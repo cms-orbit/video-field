@@ -1,0 +1,46 @@
+{
+    "name": "cms-orbit/video-field",
+    "version": "1.0.0",
+    "description": "A comprehensive video upload and multi-encoding system for CMS-Orbit with streaming support, transcoding, and thumbnails",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "xiso",
+            "email": "ceo@amuz.co.kr"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "amuz/cms-orbit": "3.0.20",
+        "intervention/image": "^3.0",
+        "symfony/process": "^6.0",
+        "league/flysystem": "^3.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^8.0",
+        "phpunit/phpunit": "^10.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "CmsOrbit\\Video\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "CmsOrbit\\Video\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "CmsOrbit\\Video\\VideoServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
