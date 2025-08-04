@@ -40,7 +40,7 @@ class VideoServiceProvider extends ServiceProvider
 
         // 관리자 화면에 엔티티 자동 등록
         CmsHelper::addEntityPath(
-            "CmsOrbit\\VideoField\\Video\\Entities",
+            "CmsOrbit\\VideoField\\Entities",
             __DIR__ . "/Entities"
         );
     }

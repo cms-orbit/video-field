@@ -25,15 +25,15 @@ composer require cms-orbit/video
 // bootstrap/providers.php
 return [
     // ...
-    CmsOrbit\Video\VideoServiceProvider::class,
+    CmsOrbit\VideoField\VideoServiceProvider::class,
 ];
 ```
 
 ### 3. 설정 파일 발행
 ```bash
-php artisan vendor:publish --provider="CmsOrbit\Video\VideoServiceProvider" --tag="video-config"
-php artisan vendor:publish --provider="CmsOrbit\Video\VideoServiceProvider" --tag="video-migrations"
-php artisan vendor:publish --provider="CmsOrbit\Video\VideoServiceProvider" --tag="video-lang"
+php artisan vendor:publish --provider="CmsOrbit\VideoField\VideoServiceProvider" --tag="video-config"
+php artisan vendor:publish --provider="CmsOrbit\VideoField\VideoServiceProvider" --tag="video-migrations"
+php artisan vendor:publish --provider="CmsOrbit\VideoField\VideoServiceProvider" --tag="video-lang"
 ```
 
 ### 4. 마이그레이션 실행
@@ -91,7 +91,7 @@ php artisan queue:work
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use CmsOrbit\Video\Traits\HasVideoField;
+use CmsOrbit\VideoField\Traits\HasVideoField;
 
 class Post extends Model
 {
