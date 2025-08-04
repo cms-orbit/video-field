@@ -21,6 +21,7 @@ class VideoServiceProvider extends ServiceProvider
 
     /**
      * Register any application services.
+     * @throws ReservedAliasException
      */
     public function register(): void
     {
@@ -77,6 +78,9 @@ class VideoServiceProvider extends ServiceProvider
                 VideoProcessAllCommand::class,
             ]);
         }
+
+        // Register view namespace
+        $this->loadViewsFrom(__DIR__ . '/resources/views', 'video-field');
     }
 
     /**

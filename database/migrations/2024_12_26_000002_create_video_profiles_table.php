@@ -19,6 +19,7 @@ return new class extends Migration
             $table->string('profile'); // 프로파일명 (4K@60fps, FHD@30fps 등)
             $table->string('path')->nullable(); // 인코딩된 파일 경로
             $table->boolean('encoded')->default(false); // 인코딩 완료 여부
+            $table->enum('status', ['pending', 'processing', 'completed', 'failed'])->default('pending');
             $table->bigInteger('file_size')->nullable(); // 파일 크기 (bytes)
             $table->integer('width')->nullable(); // 가로 해상도
             $table->integer('height')->nullable(); // 세로 해상도

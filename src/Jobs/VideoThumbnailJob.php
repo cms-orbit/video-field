@@ -33,10 +33,14 @@ class VideoThumbnailJob implements ShouldQueue
         $this->video = $video;
         $this->captureTime = $captureTime;
         $this->force = $force;
+    }
 
-        // Set queue configuration
-        $this->onQueue(config('video.queue.queue_name', 'encode_video'));
-        $this->onConnection(config('video.queue.connection', 'redis'));
+    /**
+     * Get the video instance.
+     */
+    public function getVideo(): Video
+    {
+        return $this->video;
     }
 
     /**

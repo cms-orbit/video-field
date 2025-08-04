@@ -19,6 +19,10 @@ return new class extends Migration
             $table->string('original_filename');
             $table->bigInteger('original_size'); // 파일 크기 (bytes)
             $table->integer('duration')->nullable(); // 총 재생 시간 (초)
+            $table->integer('original_width')->nullable(); // 원본 비디오 너비
+            $table->integer('original_height')->nullable(); // 원본 비디오 높이
+            $table->float('original_framerate')->nullable(); // 원본 프레임레이트
+            $table->integer('original_bitrate')->nullable(); // 원본 비트레이트
             $table->string('thumbnail_path')->nullable();
             $table->string('scrubbing_sprite_path')->nullable();
             $table->integer('sprite_columns')->nullable();
@@ -28,8 +32,9 @@ return new class extends Migration
             $table->enum('status', ['pending', 'processing', 'completed', 'failed'])->default('pending');
             $table->unsignedBigInteger('user_id')->nullable();
             $table->json('meta_data')->nullable(); // 추가 메타데이터
-            $table->timestamps();
-            $table->softDeletes();
+                    $table->timestamps();
+        $table->softDeletes();
+        $table->integer('sort_order')->default(0);
 
             // 인덱스
             $table->index(['status']);

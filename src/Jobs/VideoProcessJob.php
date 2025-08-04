@@ -32,10 +32,14 @@ class VideoProcessJob implements ShouldQueue
         $this->video = $video;
         $this->force = $force;
         $this->profileFilter = $profileFilter;
+    }
 
-        // Set queue configuration
-        $this->onQueue(config('video.queue.queue_name', 'encode_video'));
-        $this->onConnection(config('video.queue.connection', 'redis'));
+    /**
+     * Get the video instance.
+     */
+    public function getVideo(): Video
+    {
+        return $this->video;
     }
 
     /**
@@ -92,12 +96,16 @@ class VideoProcessJob implements ShouldQueue
 
         $spriteJob = (new VideoSpriteJob($this->video, 100, 10, 10, $this->force))
             ->onQueue($queueName);
+            
+        $manifestJob = (new VideoManifestJob($this->video))
+            ->onQueue($queueName);
 
         // Chain jobs using Bus::chain()
         \Illuminate\Support\Facades\Bus::chain([
             $encodeJob,
             $thumbnailJob,
-            $spriteJob
+            $spriteJob,
+            $manifestJob
         ])->onQueue($queueName)->dispatch();
 
         Log::info("Job chain dispatched for video: {$this->video->getAttribute('id')}");
