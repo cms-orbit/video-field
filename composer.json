@@ -12,9 +12,9 @@
     ],
     "require": {
         "php": "^8.3",
-        "amuz/cms-orbit": "3.0.20",
+        "amuz/cms-orbit": "^3.0.21",
         "intervention/image": "^3.0",
-        "symfony/process": "^6.0",
+        "symfony/process": "^7.0",
         "league/flysystem": "^3.0"
     },
     "require-dev": {
@@ -23,18 +23,18 @@
     },
     "autoload": {
         "psr-4": {
-            "CmsOrbit\\Video\\": "src/"
+            "CmsOrbit\\VideoField\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "CmsOrbit\\Video\\Tests\\": "tests/"
+            "CmsOrbit\\VideoField\\Tests\\": "tests/"
         }
     },
     "extra": {
         "laravel": {
             "providers": [
-                "CmsOrbit\\Video\\VideoServiceProvider"
+                "CmsOrbit\\VideoField\\VideoServiceProvider"
             ]
         }
     },

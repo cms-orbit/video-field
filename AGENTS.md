@@ -32,7 +32,23 @@ class Announcement extends DynamicModel
 
 ## 2. 시스템 아키텍처
 
-### 2.1 데이터 구조
+### 2.1 비디오 업로드
+- ✅ 청크 기반 업로드 (대용량 파일 지원)
+- ✅ 다중 파일 업로드
+- ✅ 드래그 앤 드롭 인터페이스
+- ✅ 업로드 진행률 실시간 표시
+- ✅ 업로드 일시정지/재개 기능
+- ✅ 파일 유효성 검사 (포맷, 크기, 코덱)
+
+### 2.2 비디오 인코딩
+- ✅ FFmpeg 기반 트랜스코딩
+- ✅ 다중 해상도 지원 (240p ~ 4K)
+- ✅ 적응형 비트레이트 스트리밍 (ABR)
+- ✅ HLS/DASH 스트리밍 포맷
+- ✅ 비디오 압축 최적화
+- ✅ 오디오 트랙 분리 및 최적화
+
+### 2.3 데이터 구조
 
 #### Video 엔티티 (DynamicModel)
 - 메인 비디오 정보 저장
@@ -46,7 +62,7 @@ class Announcement extends DynamicModel
 - 인코딩 상태 관리
 - UUID 기반 식별
 
-### 2.2 핵심 컴포넌트
+### 2.4 핵심 컴포넌트
 
 #### HasVideoField Trait
 - 비디오 필드 자동 관리
@@ -65,8 +81,8 @@ class Announcement extends DynamicModel
 - SD@30fps: 640x480, 30fps, 2M bitrate
 ```
 
-### 2.3 워크플로우
-1. **업로드**: 비디오 파일 업로드 → Video 엔티티 생성
+### 2.5 워크플로우
+1. **업로드**: 비디오 파일 업로드 → Video 엔티티 생성 (대용량 청크업로드 및 검증 포함)
 2. **큐잉**: encode_video 큐에 인코딩 작업 추가
 3. **인코딩**: 각 프로파일별 FFmpeg 인코딩 실행
 4. **완료**: VideoProfile 레코드의 encoded 필드 true로 업데이트
