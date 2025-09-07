@@ -472,7 +472,6 @@ class VideoSpriteJob implements ShouldQueue
             'video_id' => $this->video->getAttribute('id'),
             'sprite' => [
                 'path' => $spritePath,
-                'url' => Storage::disk($disk)->url($spritePath),
                 'format' => $format,
                 'file_size' => $fileSize,
                 'file_size_human' => $this->formatFileSize($fileSize),

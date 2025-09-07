@@ -36,7 +36,9 @@ class VideoListLayout extends Table
                 ->render(function (Video $video) {
                     if ($video->hasThumbnail()) {
                         $thumbnailUrl = $video->getThumbnailUrl();
-                        return "<img src='{$thumbnailUrl}' class='img-thumbnail' style='width: 60px; height: 40px; object-fit: cover;'>";
+                        if ($thumbnailUrl) {
+                            return "<img src='{$thumbnailUrl}' class='img-thumbnail' style='width: 60px; height: 40px; object-fit: cover;' alt='Video thumbnail'>";
+                        }
                     }
                     return "<div class='bg-light d-flex align-items-center justify-content-center' style='width: 60px; height: 40px;'><i class='bs bs-play-circle text-muted'></i></div>";
                 }),

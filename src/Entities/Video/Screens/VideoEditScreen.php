@@ -7,18 +7,18 @@ namespace CmsOrbit\VideoField\Entities\Video\Screens;
 use App\Settings\Entities\User\User;
 use App\Settings\Extends\OrbitLayout;
 use CmsOrbit\VideoField\Entities\Video\Layouts\BasicInformationLayout;
-use CmsOrbit\VideoField\Entities\Video\Layouts\VideoDetailsLayout;
-use CmsOrbit\VideoField\Entities\Video\Layouts\VideoProfilesLayout;
-use CmsOrbit\VideoField\Entities\Video\Layouts\EncodingStatusLayout;
+use CmsOrbit\VideoField\Entities\Video\Layouts\VideoProfilesAndEncodingLayout;
 use CmsOrbit\VideoField\Entities\Video\Layouts\Modals\FfmpegCommandModal;
 use CmsOrbit\VideoField\Entities\Video\Layouts\Modals\ErrorOutputModal;
 use CmsOrbit\VideoField\Entities\Video\Layouts\Modals\ProfileLogsModal;
 
 use CmsOrbit\VideoField\Entities\Video\Video;
-use CmsOrbit\VideoField\Jobs\VideoProcessJob;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
+use Orchid\Attachment\Models\Attachment;
 use Orchid\Screen\Actions\Button;
+use Orchid\Screen\Fields\Picture;
 use Orchid\Screen\Screen;
 use Orchid\Support\Facades\Toast;
 
@@ -105,19 +105,30 @@ class VideoEditScreen extends Screen
     public function layout(): array
     {
         return [
-            // Video Information Tabs
-            OrbitLayout::tabs([
-                __('Preview') => OrbitLayout::view('cms-orbit-video::video-player'),
-                __('Basic Information') => (new BasicInformationLayout)(),
-                __('Video Details') => new VideoDetailsLayout,
-                __('Profiles') => new VideoProfilesLayout,
-                __('Encoding') => new EncodingStatusLayout,
+            OrbitLayout::columns([
+                OrbitLayout::rows([
+                    Picture::make('video.thumbnail_url')
+                        ->groups('video_thumbnail')
+                        ->targetId()
+                        ->path($this->video->getThumbnailPath())
+                        ->storage(config('orbit-video.storage.disk'))
+                        ->title(__('Thumbnail')),
+                ]),
+                OrbitLayout::blank([
+                    new BasicInformationLayout,
+                    new VideoProfilesAndEncodingLayout,
+                ])
             ]),
+            OrbitLayout::view('cms-orbit-video::video-file-info'),
+            OrbitLayout::view('cms-orbit-video::video-player'),
 
             // Modals
-            OrbitLayout::modal('ffmpeg-command-modal', FfmpegCommandModal::class),
-            OrbitLayout::modal('error-output-modal', ErrorOutputModal::class),
-            OrbitLayout::modal('profile-logs-modal', ProfileLogsModal::class),
+            OrbitLayout::modal('ffmpeg-command-modal', FfmpegCommandModal::class)
+                ->deferred('viewFfmpegCommand'),
+            OrbitLayout::modal('error-output-modal', ErrorOutputModal::class)
+                ->deferred('viewErrorOutput'),
+            OrbitLayout::modal('profile-logs-modal', ProfileLogsModal::class)
+                ->deferred('viewProfileLogs'),
         ];
     }
 
@@ -131,26 +142,18 @@ class VideoEditScreen extends Screen
      */
     public function save(Request $request, Video $video)
     {
-        $request->validate([
-            'video.title' => 'required|string|max:255',
-            'video.description' => 'nullable|string',
-        ]);
+        $args = $request->get('video');
 
-        // Only allow editing title and description for existing videos
-        if ($video->exists) {
-            $video->update([
-                'title' => $request->get('video.title'),
-                'description' => $request->get('video.description'),
-            ]);
-        } else {
-            // For new videos, create with basic info
-            $video->fill([
-                'title' => $request->get('video.title'),
-                'description' => $request->get('video.description'),
-                'status' => 'pending',
-                'user_id' => auth()->id(),
-            ])->save();
+        $attachmentId = Arr::get($args,'thumbnail_url');
+        if($attachmentId){
+            /** @var Attachment $thumbnail */
+            $thumbnail = Attachment::query()->findOrFail($attachmentId);
+            $video->setAttribute('thumbnail_path',$thumbnail->physicalPath());
         }
+
+        $video->setAttribute('title',Arr::get($args,'title'));
+        $video->setAttribute('description',Arr::get($args,'description'));
+        $video->save();
 
         Toast::info(__('Video information was saved.'));
 
@@ -178,37 +181,6 @@ class VideoEditScreen extends Screen
         }
 
         return redirect()->route('settings.entities.videos');
-    }
-
-    /**
-     * Handle video upload from VideoUpload field.
-     *
-     * @param Request $request
-     *
-     * @return \Illuminate\Http\JsonResponse
-     */
-    public function handleVideoUpload(Request $request)
-    {
-        $request->validate([
-            'title' => 'required|string|max:255',
-            'description' => 'nullable|string',
-            'video_upload' => 'required|array',
-        ]);
-
-        // Create new video record
-        $video = Video::create([
-            'title' => $request->get('title'),
-            'description' => $request->get('description'),
-            'status' => 'pending',
-            'user_id' => auth()->id(),
-        ]);
-
-        // The actual video file processing will be handled by the VideoUpload field
-        // and the VideoProcessJob will be dispatched automatically
-
-        Toast::info(__('Video uploaded successfully. Processing will begin shortly.'));
-
-        return redirect()->route('settings.entities.videos.edit', $video);
     }
 
     /**
@@ -246,9 +218,22 @@ class VideoEditScreen extends Screen
         $profile = \CmsOrbit\VideoField\Entities\Video\VideoProfile::findOrFail($profileId);
         $logs = $profile->encodingLogs()->latest()->get();
 
+        // Convert logs to JSON format for display
+        $logsData = $logs->map(function ($log) {
+            return [
+                'id' => $log->getAttribute('id'),
+                'status' => $log->getAttribute('status'),
+                'progress' => $log->getAttribute('progress'),
+                'message' => $log->getAttribute('message'),
+                'processing_time' => $log->getReadableProcessingTime(),
+                'ffmpeg_command' => $log->getAttribute('ffmpeg_command'),
+                'error_output' => $log->getAttribute('error_output'),
+                'created_at' => $log->getAttribute('created_at')?->format('Y-m-d H:i:s'),
+            ];
+        });
+
         return [
-            'profileLogsModal.profile' => $profile,
-            'profileLogsModal.logs' => $logs,
+            'profileLogsModal.logs' => json_encode($logsData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
         ];
     }
 

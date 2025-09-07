@@ -124,7 +124,7 @@ class VideoThumbnailJob implements ShouldQueue
             $thumbnailPath = $this->generateThumbnailImage($originalPath, $captureTime);
 
             if ($thumbnailPath) {
-                // Update video record
+                // Update video record with relative path
                 $this->video->update(['thumbnail_path' => $thumbnailPath]);
                 Log::info("Thumbnail saved to: {$thumbnailPath}");
                 return true;
@@ -255,5 +255,6 @@ class VideoThumbnailJob implements ShouldQueue
 
         return $command;
     }
+
 
 }

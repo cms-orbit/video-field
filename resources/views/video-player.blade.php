@@ -1,8 +1,8 @@
 @if($video->exists && $video->getAttribute('status') === 'completed')
     <div class="bg-white rounded-lg shadow-sm border p-6">
-        <h3 class="text-lg font-semibold text-gray-900 mb-4">{{ __('Video Player') }}</h3>
-        
-        <div class="space-y-4">
+        <h3 class="text-lg font-semibold text-gray-900 mb-4">{{ __('Video Preview') }}</h3>
+
+        <div class="flex gap-x-3">
             <!-- HLS Stream Test -->
             @if($video->getBestHlsUrl())
                 <div class="border rounded-lg p-4">
@@ -11,9 +11,9 @@
                         <code class="text-sm text-gray-600 break-all">{{ $video->getBestHlsUrl() }}</code>
                     </div>
                     <div class="video-player-container">
-                        <video 
-                            id="hls-player" 
-                            controls 
+                        <video
+                            id="hls-player"
+                            controls
                             class="w-full max-w-2xl"
                             style="max-height: 400px;"
                             preload="metadata">
@@ -32,9 +32,9 @@
                         <code class="text-sm text-gray-600 break-all">{{ $video->getBestDashUrl() }}</code>
                     </div>
                     <div class="video-player-container">
-                        <video 
-                            id="dash-player" 
-                            controls 
+                        <video
+                            id="dash-player"
+                            controls
                             class="w-full max-w-2xl"
                             style="max-height: 400px;"
                             preload="metadata">
@@ -42,21 +42,6 @@
                             {{ __('Your browser does not support DASH video playback.') }}
                         </video>
                     </div>
-                </div>
-            @endif
-
-            <!-- Thumbnail Preview -->
-            @if($video->getThumbnailUrl())
-                <div class="border rounded-lg p-4">
-                    <h4 class="font-medium text-gray-800 mb-2">{{ __('Thumbnail Preview') }}</h4>
-                    <div class="bg-gray-50 rounded p-3 mb-3">
-                        <code class="text-sm text-gray-600 break-all">{{ $video->getThumbnailUrl() }}</code>
-                    </div>
-                    <img 
-                        src="{{ $video->getThumbnailUrl() }}" 
-                        alt="{{ __('Video Thumbnail') }}"
-                        class="max-w-xs rounded shadow-sm"
-                        style="max-height: 200px;">
                 </div>
             @endif
 
@@ -91,14 +76,14 @@
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <!-- Dash.js CDN -->
     <script src="https://cdn.jsdelivr.net/npm/dashjs@latest/dist/dash.all.min.js"></script>
-    
+
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             // HLS.js for HLS support
             if (typeof Hls !== 'undefined' && document.getElementById('hls-player')) {
                 const hlsPlayer = document.getElementById('hls-player');
                 const hlsUrl = hlsPlayer.querySelector('source').src;
-                
+
                 if (Hls.isSupported()) {
                     const hls = new Hls({
                         debug: false, // 디버그 모드 비활성화
@@ -159,37 +144,37 @@
                     });
                     hls.loadSource(hlsUrl);
                     hls.attachMedia(hlsPlayer);
-                    
+
                     hls.on(Hls.Events.ERROR, function (event, data) {
                         // SourceBuffer 관련 에러는 무시 (재생에는 영향 없음)
-                        if (data.details === 'bufferAddCodecError' || 
+                        if (data.details === 'bufferAddCodecError' ||
                             data.details === 'bufferAppendError' ||
                             data.details === 'bufferFullError' ||
                             data.details === 'bufferStalledError') {
                             return;
                         }
-                        
+
                         // 치명적인 에러만 로깅
                         if (data.fatal) {
                             console.error('HLS Fatal Error:', data);
                         }
                     });
-                    
+
                     // 화질 전환 이벤트 로깅
                     hls.on(Hls.Events.LEVEL_SWITCHED, function (event, data) {
                         console.log('Quality switched to level:', data.level);
                     });
-                    
+
                     // 대역폭 변화 이벤트 로깅
                     hls.on(Hls.Events.BANDWIDTH_ESTIMATE, function (event, data) {
                         console.log('Bandwidth estimate:', Math.round(data.bandwidth / 1000) + ' kbps');
                     });
-                    
+
                     // 버퍼 상태 이벤트
                     hls.on(Hls.Events.BUFFER_FLUSHED, function (event, data) {
                         console.log('Buffer flushed:', data);
                     });
-                    
+
                     // 미디어 연결 이벤트
                     hls.on(Hls.Events.MEDIA_ATTACHED, function (event, data) {
                         console.log('Media attached:', data);
@@ -204,9 +189,9 @@
             if (typeof dashjs !== 'undefined' && document.getElementById('dash-player')) {
                 const dashPlayer = document.getElementById('dash-player');
                 const dashUrl = dashPlayer.querySelector('source').src;
-                
+
                 const dash = dashjs.MediaPlayer().create();
-                
+
                 // ABR 설정 (지원되는 설정만 사용)
                 dash.updateSettings({
                     'debug': {
@@ -229,13 +214,13 @@
                         }
                     }
                 });
-                
+
                 dash.initialize(dashPlayer, dashUrl, false);
-                
+
                 dash.on('error', function(e) {
                     console.error('DASH Error:', e);
                 });
-                
+
                 // 화질 전환 이벤트 로깅
                 dash.on('qualityChangeRequested', function(e) {
                     console.log('DASH Quality change requested:', e);

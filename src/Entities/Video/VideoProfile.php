@@ -116,10 +116,7 @@ class VideoProfile extends Model
     public function getHlsUrl(): ?string
     {
         $path = $this->getAttribute('hls_path');
-        if (!$path) return null;
-
-        $disk = config('orbit-video.storage.disk');
-        return Storage::disk($disk)->url($path);
+        return $path ? $this->generateStorageUrl($path) : null;
     }
 
     /**
@@ -128,10 +125,7 @@ class VideoProfile extends Model
     public function getDashUrl(): ?string
     {
         $path = $this->getAttribute('dash_path');
-        if (!$path) return null;
-
-        $disk = config('orbit-video.storage.disk');
-        return Storage::disk($disk)->url($path);
+        return $path ? $this->generateStorageUrl($path) : null;
     }
 
 

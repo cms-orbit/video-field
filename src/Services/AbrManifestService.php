@@ -289,4 +289,5 @@ class AbrManifestService
         $videoId = $video->getAttribute('id');
         return "videos/{$videoId}";
     }
+
 }

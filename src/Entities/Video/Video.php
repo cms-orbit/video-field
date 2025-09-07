@@ -53,7 +53,6 @@ class Video extends DynamicModel
         'abr_profiles' => 'array',
     ];
 
-
     public static function getMenuSection(): string
     {
         return __('Media');
@@ -134,7 +133,8 @@ class Video extends DynamicModel
     public function getScrubbingSpriteUrl(): ?string
     {
         $metadata = $this->getSpriteMetadata();
-        return $metadata['sprite']['url'] ?? null;
+        $path = $metadata['sprite']['path'] ?? null;
+        return $path ? $this->generateStorageUrl($path) : null;
     }
 
     /**
@@ -145,9 +145,7 @@ class Video extends DynamicModel
         if (!$this->originalFile) {
             throw new \Exception('Original file not found for video: ' . $this->getAttribute('id'));
         }
-
-        $filePath = $this->originalFile->getAttribute('path') . $this->originalFile->getAttribute('name') . "." . $this->originalFile->getAttribute('extension');
-        return Storage::disk(config('orbit-video.storage.disk'))->path($filePath);
+        return Storage::disk(config('orbit-video.storage.disk'))->path($this->originalFile->physicalPath());
     }
 
     /**
@@ -263,7 +261,7 @@ class Video extends DynamicModel
         try {
             $disk = config('orbit-video.storage.disk');
             $fullPath = Storage::disk($disk)->path($metadataPath);
-            
+
             if (!file_exists($fullPath)) {
                 return [];
             }
@@ -282,10 +280,7 @@ class Video extends DynamicModel
     public function getHlsManifestUrl(): ?string
     {
         $path = $this->getAttribute('hls_manifest_path');
-        if (!$path) return null;
-
-        $disk = config('orbit-video.storage.disk');
-        return Storage::disk($disk)->url($path);
+        return $path ? $this->generateStorageUrl($path) : null;
     }
 
     /**
@@ -294,10 +289,7 @@ class Video extends DynamicModel
     public function getDashManifestUrl(): ?string
     {
         $path = $this->getAttribute('dash_manifest_path');
-        if (!$path) return null;
-
-        $disk = config('orbit-video.storage.disk');
-        return Storage::disk($disk)->url($path);
+        return $path ? $this->generateStorageUrl($path) : null;
     }
 
     /**
@@ -393,7 +385,7 @@ class Video extends DynamicModel
         $hours = (int) floor($seconds / 3600.0);
         $minutes = (int) floor(fmod($seconds, 3600.0) / 60.0);
         $secs = fmod($seconds, 60.0);
-        
+
         return sprintf('%02d:%02d:%06.3f', $hours, $minutes, $secs);
     }
 }

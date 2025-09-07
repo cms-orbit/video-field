@@ -66,7 +66,7 @@ class VideoObserver
     /**
      * Clean up storage on delete.
      */
-    public function forceDeleted(Video $video): void
+    public function forceDeleting(Video $video): void
     {
         try {
             $video->profiles()->delete();
