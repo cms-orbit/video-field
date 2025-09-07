@@ -15,10 +15,10 @@
         "amuz/cms-orbit": "^3.0.21",
         "intervention/image": "^3.0",
         "symfony/process": "^7.0",
-        "league/flysystem": "^3.0"
+        "league/flysystem": "^3.0",
+        "php-ffmpeg/php-ffmpeg" : "^1.3.0"
     },
     "require-dev": {
-        "orchestra/testbench": "^8.0",
         "phpunit/phpunit": "^10.0"
     },
     "autoload": {
@@ -28,7 +28,6 @@
     },
     "autoload-dev": {
         "psr-4": {
-            "CmsOrbit\\VideoField\\Tests\\": "tests/"
         }
     },
     "extra": {

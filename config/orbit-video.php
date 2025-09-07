@@ -7,7 +7,7 @@ return [
     |--------------------------------------------------------------------------
     */
     'storage' => [
-        'disk' => env('MEDIA_DISK', 'public'),
+        'disk' => env('VIDEO_STORAGE_DISK', env('MEDIA_DISK', 'public')),
         'video_path' => env('VIDEO_STORAGE_PATH', 'videos/{videoId}'),
         'thumbnails_path' => env('VIDEO_THUMBNAILS_PATH', 'videos/{videoId}/thumbnails'),
         'sprites_path' => env('VIDEO_SPRITES_PATH', 'videos/{videoId}/sprites'),
@@ -22,6 +22,7 @@ return [
         'binary_path' => env('FFMPEG_BINARY_PATH', 'ffmpeg'),
         'ffprobe_path' => env('FFPROBE_BINARY_PATH', 'ffprobe'),
         'timeout' => env('FFMPEG_TIMEOUT', 3600), // 1 hour
+        'threads' => env('FFMPEG_THREADS', 12),
     ],
 
     /*
@@ -112,7 +113,7 @@ return [
     |--------------------------------------------------------------------------
     */
     'thumbnails' => [
-        'quality' => 85,
+        'quality' => 100,
         'format' => 'jpeg',
         'time_position' => '00:00:05', // 5 seconds into video
     ],
@@ -140,7 +141,7 @@ return [
     */
     'queue' => [
         'connection' => env('QUEUE_CONNECTION', 'redis'),
-        'queue_name' => env('VIDEO_QUEUE_NAME', 'encode_video'),
+        'queue_name' => env('VIDEO_QUEUE_NAME', 'default'),
         'max_tries' => env('VIDEO_MAX_TRIES', 3),
         'retry_delay' => env('VIDEO_RETRY_DELAY', 300), // 5 minutes
     ],

@@ -8,166 +8,98 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 use CmsOrbit\VideoField\Entities\Video\Video;
-use CmsOrbit\VideoField\Jobs\VideoProcessJob;
+use CmsOrbit\VideoField\Jobs\ProcessVideoJob;
 
 class VideoUploadController extends Controller
 {
     /**
-     * Upload video chunk.
+     * Upload videos using Orchid Attach field
+     *
+     * @param Request $request
+     * @return JsonResponse
      */
-    public function uploadChunk(Request $request): JsonResponse
+    public function upload(Request $request): JsonResponse
     {
         $request->validate([
-            'chunk' => 'required|file',
-            'chunk_number' => 'required|integer|min:0',
-            'total_chunks' => 'required|integer|min:1',
-            'upload_id' => 'required|string',
-            'filename' => 'required|string',
+            'videos' => 'required|array',
+            'videos.*' => 'required|file|mimes:mp4,avi,mov,wmv,flv,webm|max:102400', // 100MB max
         ]);
 
-        $uploadId = $request->get('upload_id');
-        $chunkNumber = $request->get('chunk_number');
-        $totalChunks = $request->get('total_chunks');
-        $filename = $request->get('filename');
+        try {
+            $uploadedVideos = [];
+            
+            foreach ($request->file('videos') as $file) {
+                // Store file using Laravel's file storage
+                $path = $file->store('videos', 'public');
+                
+                // Create video model
+                $video = Video::create([
+                    'title' => pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME),
+                    'filename' => $file->getClientOriginalName(),
+                    'path' => $path,
+                    'size' => $file->getSize(),
+                    'mime_type' => $file->getMimeType(),
+                    'status' => 'uploaded',
+                ]);
 
-        // Store chunk in temporary directory
-        $tempDir = "temp/video-uploads/{$uploadId}";
-        $chunkPath = "{$tempDir}/chunk_{$chunkNumber}";
+                // Dispatch job for processing (sprite, encoding, etc.)
+                ProcessVideoJob::dispatch($video);
 
-        $disk = config('video.storage.disk');
-        Storage::disk($disk)->put($chunkPath, $request->file('chunk')->getContent());
-
-        // Check if all chunks are uploaded
-        $uploadedChunks = [];
-        for ($i = 0; $i < $totalChunks; $i++) {
-            if (Storage::disk($disk)->exists("{$tempDir}/chunk_{$i}")) {
-                $uploadedChunks[] = $i;
+                $uploadedVideos[] = [
+                    'id' => $video->id,
+                    'title' => $video->title,
+                    'filename' => $video->filename,
+                ];
             }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Videos uploaded successfully',
+                'videos' => $uploadedVideos,
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Upload failed: ' . $e->getMessage(),
+            ], 500);
         }
-
-        $isComplete = count($uploadedChunks) === $totalChunks;
-
-        return response()->json([
-            'chunk_number' => $chunkNumber,
-            'uploaded_chunks' => $uploadedChunks,
-            'total_chunks' => $totalChunks,
-            'is_complete' => $isComplete,
-            'upload_id' => $uploadId,
-        ]);
     }
 
     /**
-     * Complete chunked upload and create video record.
+     * Get list of videos for selector
+     *
+     * @return JsonResponse
      */
-    public function completeUpload(Request $request): JsonResponse
+    public function list(): JsonResponse
     {
-        $request->validate([
-            'upload_id' => 'required|string',
-            'filename' => 'required|string',
-            'total_chunks' => 'required|integer|min:1',
-            'title' => 'required|string|max:255',
-            'description' => 'nullable|string',
-        ]);
+        $videos = Video::select('id', 'title', 'filename')
+            ->orderBy('created_at', 'desc')
+            ->get();
 
-        $uploadId = $request->get('upload_id');
-        $filename = $request->get('filename');
-        $totalChunks = $request->get('total_chunks');
-
-        $disk = config('video.storage.disk');
-        $tempDir = "temp/video-uploads/{$uploadId}";
-
-        // Verify all chunks exist
-        for ($i = 0; $i < $totalChunks; $i++) {
-            if (!Storage::disk($disk)->exists("{$tempDir}/chunk_{$i}")) {
-                return response()->json(['error' => "Missing chunk {$i}"], 400);
-            }
-        }
-
-        // Create video record first to get ID for path generation
-        $video = Video::create([
-            'title' => $request->get('title'),
-            'description' => $request->get('description'),
-            'original_filename' => $filename,
-            'original_size' => 0, // Will be updated after file combination
-            'mime_type' => 'video/mp4', // Will be updated after file validation
-            'status' => 'pending',
-            'user_id' => auth()->id(),
-        ]);
-
-        // Generate final path using videoId placeholder
-        $videoPath = $video->getVideoPath();
-        $finalPath = $videoPath . '/original_' . $filename;
-        $finalContent = '';
-
-        for ($i = 0; $i < $totalChunks; $i++) {
-            $chunkPath = "{$tempDir}/chunk_{$i}";
-            $finalContent .= Storage::disk($disk)->get($chunkPath);
-        }
-
-        // Store final file
-        Storage::disk($disk)->put($finalPath, $finalContent);
-
-        // Get file info
-        $fileSize = strlen($finalContent);
-        $mimeType = Storage::disk($disk)->mimeType($finalPath);
-
-        // Validate file type
-        $allowedTypes = config('video.upload.allowed_mime_types');
-        if (!in_array($mimeType, $allowedTypes)) {
-            Storage::disk($disk)->delete($finalPath);
-            return response()->json(['error' => 'Invalid file type'], 400);
-        }
-
-        // Extract video metadata (basic implementation)
-        $duration = null; // TODO: Extract using FFmpeg
-        $metadata = []; // TODO: Extract metadata
-
-        // Update video record with final information
-        $video->update([
-            'original_size' => $fileSize,
-            'duration' => $duration,
-            'mime_type' => $mimeType,
-            'meta_data' => $metadata,
-        ]);
-
-        // Dispatch complete video processing job
-        dispatch(new VideoProcessJob($video, false));
-
-        \Log::info("Video upload completed and processing job dispatched", [
-            'video_id' => $video->getAttribute('id'),
-            'filename' => $filename,
-            'size' => $fileSize
-        ]);
-
-        // Clean up temporary files
-        Storage::disk($disk)->deleteDirectory($tempDir);
-
-        return response()->json([
-            'video' => $video,
-            'message' => 'Upload completed successfully',
-        ], 201);
+        return response()->json($videos);
     }
 
     /**
-     * Cancel upload and clean up temporary files.
+     * Get video by ID
+     *
+     * @param int $id
+     * @return JsonResponse
      */
-    public function cancelUpload(Request $request): JsonResponse
+    public function show(int $id): JsonResponse
     {
-        $request->validate([
-            'upload_id' => 'required|string',
+        $video = Video::findOrFail($id);
+
+        return response()->json([
+            'id' => $video->id,
+            'title' => $video->title,
+            'filename' => $video->filename,
+            'path' => $video->path,
+            'size' => $video->size,
+            'mime_type' => $video->mime_type,
+            'status' => $video->status,
+            'created_at' => $video->created_at,
         ]);
-
-        $uploadId = $request->get('upload_id');
-        $disk = config('video.storage.disk');
-        $tempDir = "temp/video-uploads/{$uploadId}";
-
-        // Clean up temporary files
-        if (Storage::disk($disk)->exists($tempDir)) {
-            Storage::disk($disk)->deleteDirectory($tempDir);
-        }
-
-        return response()->json(['message' => 'Upload cancelled']);
     }
 }

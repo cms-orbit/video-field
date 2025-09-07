@@ -6,6 +6,7 @@ namespace CmsOrbit\VideoField\Jobs;
 
 use CmsOrbit\VideoField\Entities\Video\Video;
 use CmsOrbit\VideoField\Services\AbrManifestService;
+use CmsOrbit\VideoField\Traits\VideoJobTrait;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -15,7 +16,7 @@ use Exception;
 
 class VideoManifestJob implements ShouldQueue
 {
-    use Queueable, InteractsWithQueue, SerializesModels;
+    use Queueable, InteractsWithQueue, SerializesModels, VideoJobTrait;
 
     public $timeout = 300; // 5 minutes
     public $tries = 2;
@@ -44,7 +45,8 @@ class VideoManifestJob implements ShouldQueue
     public function handle(): void
     {
         try {
-            Log::info("Starting manifest generation for video: {$this->video->getAttribute('id')}");
+            $videoId = $this->video->getAttribute('id');
+            $this->logJobStart('manifest generation', $videoId);
 
             $manifestService = new AbrManifestService();
 
@@ -63,11 +65,15 @@ class VideoManifestJob implements ShouldQueue
             // Update ABR profiles cache
             $manifestService->updateAbrProfiles($this->video);
 
-            Log::info("Manifest generation completed for video: {$this->video->getAttribute('id')}");
+            $this->logJobCompletion('manifest generation', $videoId);
+
+            // If all profiles are encoded, mark video as completed
+            if ($this->video->isFullyEncoded()) {
+                $this->video->update(['status' => 'completed']);
+            }
 
         } catch (Exception $e) {
-            Log::error("Manifest generation job exception for video: {$this->video->getAttribute('id')}", [
-                'error' => $e->getMessage(),
+            $this->logJobError('manifest generation', $this->video->getAttribute('id'), $e->getMessage(), [
                 'trace' => $e->getTraceAsString()
             ]);
             throw $e;

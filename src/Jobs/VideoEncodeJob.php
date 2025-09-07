@@ -7,6 +7,7 @@ namespace CmsOrbit\VideoField\Jobs;
 use CmsOrbit\VideoField\Entities\Video\Video;
 use CmsOrbit\VideoField\Entities\Video\VideoProfile;
 use CmsOrbit\VideoField\Entities\Video\VideoEncodingLog;
+use CmsOrbit\VideoField\Traits\VideoJobTrait;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -18,22 +19,22 @@ use Exception;
 
 class VideoEncodeJob implements ShouldQueue
 {
-    use Queueable, InteractsWithQueue, SerializesModels;
+    use Queueable, InteractsWithQueue, SerializesModels, VideoJobTrait;
 
     public $timeout = 3600; // 1 hour
     public $tries = 3;
 
     protected Video $video;
-    protected ?string $profileFilter;
+    protected ?array $modelProfiles;
     protected bool $force;
 
     /**
      * Create a new job instance.
      */
-    public function __construct(Video $video, ?string $profileFilter = null, bool $force = false)
+    public function __construct(Video $video, ?array $modelProfiles = null, bool $force = false)
     {
         $this->video = $video;
-        $this->profileFilter = $profileFilter;
+        $this->modelProfiles = $modelProfiles;
         $this->force = $force;
     }
 
@@ -51,26 +52,26 @@ class VideoEncodeJob implements ShouldQueue
     public function handle(): void
     {
         try {
-            Log::info("Starting video encoding job for video: {$this->video->getAttribute('id')}");
+            $videoId = $this->video->getAttribute('id');
+            $this->logJobStart('video encoding', $videoId);
 
-            // Update video status
-            $this->video->update(['status' => 'encoding']);
+            // Update video status (use valid enum value)
+            $this->video->update(['status' => 'processing']);
 
             // Perform encoding
             $success = $this->encodeVideo();
 
             if ($success) {
                 $this->video->update(['status' => 'completed']);
-                Log::info("Video encoding completed successfully for video: {$this->video->getAttribute('id')}");
+                $this->logJobCompletion('video encoding', $videoId);
             } else {
                 $this->video->update(['status' => 'failed']);
-                Log::error("Video encoding failed for video: {$this->video->getAttribute('id')}");
+                $this->logJobError('video encoding', $videoId, 'Encoding process failed');
             }
 
         } catch (Exception $e) {
             $this->video->update(['status' => 'failed']);
-            Log::error("Video encoding job exception for video: {$this->video->getAttribute('id')}", [
-                'error' => $e->getMessage(),
+            $this->logJobError('video encoding', $this->video->getAttribute('id'), $e->getMessage(), [
                 'trace' => $e->getTraceAsString()
             ]);
             throw $e;
@@ -96,39 +97,45 @@ class VideoEncodeJob implements ShouldQueue
     {
         // Check if FFmpeg is available
         if (!$this->checkFFmpeg()) {
-            Log::error('FFmpeg not found');
+            $this->logJobError('video encoding', $this->video->getAttribute('id'), 'FFmpeg not found');
             return false;
         }
 
         // Find original file
-        $originalPath = $this->findOriginalFile();
-        if (!$originalPath) {
-            Log::error('Original video file not found');
+        try {
+            $originalPath = $this->video->getVideoPath();
+        } catch (Exception $e) {
+            $this->logJobError('video encoding', $this->video->getAttribute('id'), 'Failed to get video path: ' . $e->getMessage());
+            return false;
+        }
+
+        if (!$originalPath || !file_exists($originalPath)) {
+            $this->logJobError('video encoding', $this->video->getAttribute('id'), 'Original video file not found at: ' . $originalPath);
             return false;
         }
 
         // Get video metadata
         $metadata = $this->getVideoMetadata($originalPath);
         if (!$metadata) {
-            Log::error('Failed to extract video metadata');
+            $this->logJobError('video encoding', $this->video->getAttribute('id'), 'Failed to extract video metadata');
             return false;
         }
 
         // Update video with metadata
         $this->video->update([
             'duration' => $metadata['duration'] ?? null,
-            'width' => $metadata['width'] ?? null,
-            'height' => $metadata['height'] ?? null,
-            'framerate' => $metadata['framerate'] ?? null,
-            'bitrate' => $metadata['bitrate'] ?? null,
+            'original_width' => $metadata['width'] ?? null,
+            'original_height' => $metadata['height'] ?? null,
+            'original_framerate' => $metadata['framerate'] ?? null,
+            'original_bitrate' => $metadata['bitrate'] ?? null,
         ]);
 
-        // Get profiles to encode
-        $allProfiles = config('video.profiles', []);
+        // Get profiles to encode - use model profiles if available, otherwise use config
+        $allProfiles = $this->modelProfiles ?? config('orbit-video.default_profiles', []);
         $suitableProfiles = $this->selectSuitableProfiles($metadata, $allProfiles);
 
         if (empty($suitableProfiles)) {
-            Log::warning('No suitable profiles found for encoding');
+            Log::warning('No suitable profiles found for encoding for video: ' . $this->video->getAttribute('id'));
             return true; // Not an error, just no encoding needed
         }
 
@@ -140,7 +147,10 @@ class VideoEncodeJob implements ShouldQueue
         }
 
         $totalProfiles = count($suitableProfiles);
-        Log::info("Encoding completed: {$successCount}/{$totalProfiles} profiles successful");
+        $this->logJobCompletion('video encoding', $this->video->getAttribute('id'), [
+            'successful_profiles' => $successCount,
+            'total_profiles' => $totalProfiles
+        ]);
 
         return $successCount > 0; // Success if at least one profile was encoded
     }
@@ -157,7 +167,7 @@ class VideoEncodeJob implements ShouldQueue
                 ->first();
 
             if ($existingProfile && !$this->force) {
-                $disk = config('video.storage.disk');
+                $disk = config('orbit-video.storage.disk');
                 if (Storage::disk($disk)->exists($existingProfile->generateProfilePath())) {
                     Log::info("Profile {$profileName} already exists, skipping");
                     return true;
@@ -168,67 +178,53 @@ class VideoEncodeJob implements ShouldQueue
             $videoProfile = VideoProfile::updateOrCreate(
                 [
                     'video_id' => $this->video->getAttribute('id'),
+                    'field' => 'default',
                     'profile' => $profileName,
                 ],
                 [
-                    'status' => 'encoding',
-                    'started_at' => now(),
+                    'status' => 'processing',
                 ]
             );
 
             // Create encoding log
             $encodingLog = $videoProfile->encodingLogs()->create([
                 'status' => 'started',
-                'started_at' => now(),
+                'message' => 'Encoding started',
+                'progress' => 0,
                 'ffmpeg_command' => 'Building command...',
             ]);
 
-            // Build output path
-            $outputPath = $videoProfile->generateProfilePath();
-            $command = $this->buildFFmpegCommand($originalPath, $outputPath, $profileConfig);
+            // Encode both HLS and DASH formats
+            $hlsSuccess = $this->encodeHlsProfile($videoProfile, $originalPath, $profileConfig, $encodingLog);
+            $dashSuccess = $this->encodeDashProfile($videoProfile, $originalPath, $profileConfig, $encodingLog);
 
-            // Update log with actual command
-            $encodingLog->update(['ffmpeg_command' => implode(' ', $command)]);
-
-            Log::info("Starting encoding for profile: {$profileName}");
-
-            // Execute FFmpeg
-            $process = new Process($command);
-            $process->setTimeout(3600); // 1 hour timeout
-            $process->run();
-
-            if ($process->isSuccessful()) {
-                // Get output file size
-                $disk = config('video.storage.disk');
-                $fileSize = Storage::disk($disk)->size($outputPath);
-
+            if ($hlsSuccess || $dashSuccess) {
                 // Update profile and log
                 $videoProfile->update([
                     'status' => 'completed',
-                    'file_size' => $fileSize,
-                    'completed_at' => now(),
+                    'encoded' => true,
+                    'width' => $profileConfig['width'] ?? null,
+                    'height' => $profileConfig['height'] ?? null,
+                    'framerate' => $profileConfig['framerate'] ?? null,
+                    'bitrate' => $profileConfig['bitrate'] ?? null,
                 ]);
 
                 $encodingLog->update([
                     'status' => 'completed',
-                    'completed_at' => now(),
-                    'file_size' => $fileSize,
+                    'message' => 'Encoding completed',
+                    'progress' => 100,
                 ]);
 
-                Log::info("Profile {$profileName} encoded successfully ({$this->formatFileSize($fileSize)})");
+                Log::info("Profile {$profileName} encoded successfully");
                 return true;
-
             } else {
-                $errorOutput = $process->getErrorOutput();
-
                 $videoProfile->update(['status' => 'failed']);
                 $encodingLog->update([
-                    'status' => 'failed',
-                    'error_message' => $errorOutput,
-                    'completed_at' => now(),
+                    'status' => 'error',
+                    'error_output' => 'Both HLS and DASH encoding failed',
                 ]);
 
-                Log::error("Profile {$profileName} encoding failed: {$errorOutput}");
+                Log::error("Profile {$profileName} encoding failed");
                 return false;
             }
 
@@ -238,9 +234,8 @@ class VideoEncodeJob implements ShouldQueue
             }
             if (isset($encodingLog)) {
                 $encodingLog->update([
-                    'status' => 'failed',
-                    'error_message' => $e->getMessage(),
-                    'completed_at' => now(),
+                    'status' => 'error',
+                    'error_output' => $e->getMessage(),
                 ]);
             }
 
@@ -249,104 +244,6 @@ class VideoEncodeJob implements ShouldQueue
         }
     }
 
-    /**
-     * Check if FFmpeg is available.
-     */
-    private function checkFFmpeg(): bool
-    {
-        $ffmpegPath = config('video.ffmpeg.binary_path', 'ffmpeg');
-        $process = new Process([$ffmpegPath, '-version']);
-        $process->run();
-
-        return $process->isSuccessful();
-    }
-
-    /**
-     * Find the original video file.
-     */
-    private function findOriginalFile(): ?string
-    {
-        $disk = config('video.storage.disk');
-        $videoPath = $this->video->getVideoPath();
-
-        $patterns = [
-            $videoPath . '/original_' . $this->video->getAttribute('original_filename'),
-            $videoPath . '/' . $this->video->getAttribute('original_filename'),
-        ];
-
-        foreach ($patterns as $pattern) {
-            if (Storage::disk($disk)->exists($pattern)) {
-                return Storage::disk($disk)->path($pattern);
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Get video metadata using FFprobe.
-     */
-    private function getVideoMetadata(string $filePath): ?array
-    {
-        $ffprobePath = config('video.ffmpeg.ffprobe_path', 'ffprobe');
-
-        $command = [
-            $ffprobePath,
-            '-v', 'quiet',
-            '-print_format', 'json',
-            '-show_format',
-            '-show_streams',
-            $filePath
-        ];
-
-        $process = new Process($command);
-        $process->run();
-
-        if (!$process->isSuccessful()) {
-            return null;
-        }
-
-        $output = $process->getOutput();
-        $data = json_decode($output, true);
-
-        if (!$data) {
-            return null;
-        }
-
-        // Find video stream
-        $videoStream = null;
-        foreach ($data['streams'] ?? [] as $stream) {
-            if ($stream['codec_type'] === 'video') {
-                $videoStream = $stream;
-                break;
-            }
-        }
-
-        if (!$videoStream) {
-            return null;
-        }
-
-        return [
-            'duration' => (float)($data['format']['duration'] ?? 0),
-            'width' => (int)($videoStream['width'] ?? 0),
-            'height' => (int)($videoStream['height'] ?? 0),
-            'framerate' => $this->parseFramerate($videoStream['r_frame_rate'] ?? ''),
-            'bitrate' => (int)($data['format']['bit_rate'] ?? 0),
-        ];
-    }
-
-    /**
-     * Parse framerate from FFprobe output.
-     */
-    private function parseFramerate(string $framerate): ?float
-    {
-        if (strpos($framerate, '/') !== false) {
-            [$num, $den] = explode('/', $framerate);
-            return $den > 0 ? $num / $den : null;
-        }
-
-        return (float)$framerate ?: null;
-    }
 
     /**
      * Select suitable profiles based on video metadata.
@@ -358,11 +255,25 @@ class VideoEncodeJob implements ShouldQueue
         $originalHeight = $metadata['height'] ?? 0;
         $originalFramerate = $metadata['framerate'] ?? 30;
 
-        foreach ($allProfiles as $profileName => $config) {
-            // Apply profile filter if specified
-            if ($this->profileFilter && $profileName !== $this->profileFilter) {
-                continue;
+        // If using model profiles, process them as simple profile names
+        if ($this->modelProfiles && is_array($this->modelProfiles)) {
+            $configProfiles = config('orbit-video.default_profiles', []);
+            foreach ($this->modelProfiles as $profileName) {
+                if (isset($configProfiles[$profileName])) {
+                    $config = $configProfiles[$profileName];
+                    $profileWidth = $config['width'] ?? 0;
+                    $profileHeight = $config['height'] ?? 0;
+
+                    // Skip if profile resolution is higher than original
+                    if ($profileWidth <= $originalWidth && $profileHeight <= $originalHeight) {
+                        $suitable[$profileName] = $config;
+                    }
+                }
             }
+            return $suitable;
+        }
+
+        foreach ($allProfiles as $profileName => $config) {
 
             $profileWidth = $config['width'] ?? 0;
             $profileHeight = $config['height'] ?? 0;
@@ -373,8 +284,8 @@ class VideoEncodeJob implements ShouldQueue
                 continue;
             }
 
-            // Skip if profile framerate is higher than original
-            if ($profileFramerate > $originalFramerate) {
+            // Skip if profile framerate is significantly higher than original (allow 5fps tolerance)
+            if ($profileFramerate > ($originalFramerate + 5)) {
                 continue;
             }
 
@@ -385,19 +296,143 @@ class VideoEncodeJob implements ShouldQueue
     }
 
     /**
+     * Encode HLS profile (TS segments + M3U8 playlist).
+     */
+    private function encodeHlsProfile(VideoProfile $videoProfile, string $originalPath, array $config, $encodingLog): bool
+    {
+        try {
+            $ffmpegPath = config('orbit-video.ffmpeg.binary_path', 'ffmpeg');
+            $disk = config('orbit-video.storage.disk');
+            
+            // HLS output directory
+            $hlsDir = $videoProfile->generateHlsDirectory();
+            $fullHlsDir = Storage::disk($disk)->path($hlsDir);
+            $this->ensureDirectoryExists($fullHlsDir);
+            
+            // HLS segment duration (in seconds)
+            $segmentDuration = 10;
+            
+            $command = [
+                $ffmpegPath,
+                '-i', $originalPath,
+                '-c:v', $config['codec'] ?? 'libx264',
+                '-b:v', $config['bitrate'],
+                '-r', (string)$config['framerate'],
+                '-profile:v', $config['profile'] ?? 'main',
+                '-level', $config['level'] ?? '4.0',
+                '-s', "{$config['width']}x{$config['height']}",
+                '-c:a', 'aac',
+                '-b:a', '128k',
+                '-f', 'hls',
+                '-hls_time', (string)$segmentDuration,
+                '-hls_list_size', '0',
+                '-hls_segment_filename', $fullHlsDir . '/segment_%03d.ts',
+                '-y', // Overwrite output file
+                $fullHlsDir . '/playlist.m3u8'
+            ];
+
+            // Update log with actual command
+            $encodingLog->update(['ffmpeg_command' => implode(' ', $command)]);
+
+            Log::info("Starting HLS encoding for profile: {$videoProfile->getAttribute('profile')}");
+
+            // Execute FFmpeg
+            $process = new Process($command);
+            $process->setTimeout(3600); // 1 hour timeout
+            $process->run();
+
+            if ($process->isSuccessful()) {
+                // Update profile with HLS path
+                $videoProfile->update(['hls_path' => $hlsDir . '/playlist.m3u8']);
+                Log::info("HLS profile {$videoProfile->getAttribute('profile')} encoded successfully");
+                return true;
+            } else {
+                $errorOutput = $process->getErrorOutput();
+                Log::error("HLS profile {$videoProfile->getAttribute('profile')} encoding failed: {$errorOutput}");
+                return false;
+            }
+
+        } catch (Exception $e) {
+            Log::error("Exception encoding HLS profile {$videoProfile->getAttribute('profile')}: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Encode DASH profile (MP4 segments + MPD manifest).
+     */
+    private function encodeDashProfile(VideoProfile $videoProfile, string $originalPath, array $config, $encodingLog): bool
+    {
+        try {
+            $ffmpegPath = config('orbit-video.ffmpeg.binary_path', 'ffmpeg');
+            $disk = config('orbit-video.storage.disk');
+            
+            // DASH output directory
+            $dashDir = $videoProfile->generateDashDirectory();
+            $fullDashDir = Storage::disk($disk)->path($dashDir);
+            $this->ensureDirectoryExists($fullDashDir);
+            
+            // DASH segment duration (in seconds)
+            $segmentDuration = 10;
+            
+            $command = [
+                $ffmpegPath,
+                '-i', $originalPath,
+                '-c:v', $config['codec'] ?? 'libx264',
+                '-b:v', $config['bitrate'],
+                '-r', (string)$config['framerate'],
+                '-profile:v', $config['profile'] ?? 'main',
+                '-level', $config['level'] ?? '4.0',
+                '-s', "{$config['width']}x{$config['height']}",
+                '-c:a', 'aac',
+                '-b:a', '128k',
+                '-f', 'dash',
+                '-seg_duration', (string)$segmentDuration,
+                '-use_template', '1',
+                '-use_timeline', '1',
+                '-y', // Overwrite output file
+                $fullDashDir . '/manifest.mpd'
+            ];
+
+            // Update log with actual command
+            $encodingLog->update(['ffmpeg_command' => implode(' ', $command)]);
+
+            Log::info("Starting DASH encoding for profile: {$videoProfile->getAttribute('profile')}");
+
+            // Execute FFmpeg
+            $process = new Process($command);
+            $process->setTimeout(3600); // 1 hour timeout
+            $process->run();
+
+            if ($process->isSuccessful()) {
+                // Update profile with DASH path
+                $videoProfile->update(['dash_path' => $dashDir . '/manifest.mpd']);
+                Log::info("DASH profile {$videoProfile->getAttribute('profile')} encoded successfully");
+                return true;
+            } else {
+                $errorOutput = $process->getErrorOutput();
+                Log::error("DASH profile {$videoProfile->getAttribute('profile')} encoding failed: {$errorOutput}");
+                return false;
+            }
+
+        } catch (Exception $e) {
+            Log::error("Exception encoding DASH profile {$videoProfile->getAttribute('profile')}: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Build FFmpeg command for encoding.
      */
     private function buildFFmpegCommand(string $inputPath, string $outputPath, array $config): array
     {
-        $ffmpegPath = config('video.ffmpeg.binary_path', 'ffmpeg');
-        $disk = config('video.storage.disk');
+        $ffmpegPath = config('orbit-video.ffmpeg.binary_path', 'ffmpeg');
+        $disk = config('orbit-video.storage.disk');
         $fullOutputPath = Storage::disk($disk)->path($outputPath);
 
         // Ensure output directory exists
         $outputDir = dirname($fullOutputPath);
-        if (!is_dir($outputDir)) {
-            mkdir($outputDir, 0755, true);
-        }
+        $this->ensureDirectoryExists($outputDir);
 
         return [
             $ffmpegPath,
@@ -416,20 +451,4 @@ class VideoEncodeJob implements ShouldQueue
         ];
     }
 
-    /**
-     * Format file size for display.
-     */
-    private function formatFileSize(int $bytes): string
-    {
-        $units = ['B', 'KB', 'MB', 'GB'];
-        $size = $bytes;
-        $unitIndex = 0;
-
-        while ($size > 1024 && $unitIndex < count($units) - 1) {
-            $size /= 1024;
-            $unitIndex++;
-        }
-
-        return round($size, 2) . ' ' . $units[$unitIndex];
-    }
 }

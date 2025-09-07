@@ -27,9 +27,10 @@ class AbrManifestService
             }
 
             $manifestContent = $this->buildHlsManifest($profiles);
-            $manifestPath = $video->getVideoPath() . '/playlist.m3u8';
-            
-            $disk = config('video.storage.disk');
+            $videoDir = $this->getVideoDirectory($video);
+            $manifestPath = $videoDir . '/playlist.m3u8';
+
+            $disk = config('orbit-video.storage.disk');
             Storage::disk($disk)->put($manifestPath, $manifestContent);
 
             // Update video record
@@ -62,9 +63,10 @@ class AbrManifestService
             }
 
             $manifestContent = $this->buildDashManifest($video, $profiles);
-            $manifestPath = $video->getVideoPath() . '/manifest.mpd';
-            
-            $disk = config('video.storage.disk');
+            $videoDir = $this->getVideoDirectory($video);
+            $manifestPath = $videoDir . '/manifest.mpd';
+
+            $disk = config('orbit-video.storage.disk');
             Storage::disk($disk)->put($manifestPath, $manifestContent);
 
             // Update video record
@@ -92,9 +94,15 @@ class AbrManifestService
         foreach ($profiles as $profile) {
             $bandwidth = $this->estimateBandwidth($profile);
             $resolution = "{$profile->getAttribute('width')}x{$profile->getAttribute('height')}";
-            
+            $framerate = $profile->getAttribute('framerate') ?? 30;
+
             $content .= "#EXT-X-STREAM-INF:BANDWIDTH={$bandwidth},RESOLUTION={$resolution}\n";
-            $content .= basename($profile->generateProfilePath()) . "\n";
+            // Use HLS playlist path
+            $hlsPath = $profile->getAttribute('hls_path');
+            if ($hlsPath) {
+                $relativePath = 'hls/' . basename(dirname($hlsPath)) . '/playlist.m3u8';
+                $content .= $relativePath . "\n";
+            }
         }
 
         return $content;
@@ -112,21 +120,31 @@ class AbrManifestService
                    'type="static" ' .
                    'mediaPresentationDuration="PT' . $duration . 'S" ' .
                    'profiles="urn:mpeg:dash:profile:isoff-main:2011">' . "\n";
-        
+
         $content .= '  <Period>' . "\n";
-        $content .= '    <AdaptationSet mimeType="video/mp4">' . "\n";
+        $content .= '    <AdaptationSet mimeType="video/mp4" segmentAlignment="true">' . "\n";
 
         foreach ($profiles as $profile) {
             $bandwidth = $this->estimateBandwidth($profile);
             $width = $profile->getAttribute('width');
             $height = $profile->getAttribute('height');
-            
+            $framerate = $profile->getAttribute('framerate') ?? 30;
+
             $content .= '      <Representation ' .
                        'id="' . $profile->getAttribute('profile') . '" ' .
                        'bandwidth="' . $bandwidth . '" ' .
                        'width="' . $width . '" ' .
-                       'height="' . $height . '">' . "\n";
-            $content .= '        <BaseURL>' . basename($profile->generateProfilePath()) . '</BaseURL>' . "\n";
+                       'height="' . $height . '" ' .
+                       'frameRate="' . $framerate . '">' . "\n";
+            
+            // DASH에서는 각 프로필의 세그먼트 파일들을 직접 참조
+            $dashPath = $profile->getAttribute('dash_path');
+            if ($dashPath) {
+                // DASH 세그먼트 파일들의 패턴을 참조
+                $profileName = basename(dirname($dashPath));
+                $content .= '        <SegmentTemplate media="dash/' . $profileName . '/segment_$Number$.mp4" ' .
+                           'startNumber="1" timescale="1000" duration="10000"/>' . "\n";
+            }
             $content .= '      </Representation>' . "\n";
         }
 
@@ -143,12 +161,12 @@ class AbrManifestService
     private function estimateBandwidth($profile): int
     {
         // Get bitrate from config or estimate based on resolution
-        $profileName = is_object($profile) && method_exists($profile, 'getAttribute') 
-            ? $profile->getAttribute('profile') 
+        $profileName = is_object($profile) && method_exists($profile, 'getAttribute')
+            ? $profile->getAttribute('profile')
             : $profile->profile ?? 'default';
-            
+
         $config = config("video.default_profiles.{$profileName}", []);
-        
+
         if (isset($config['bitrate'])) {
             // Convert bitrate string (e.g., "2M", "500k") to bps
             $bitrate = $config['bitrate'];
@@ -161,11 +179,11 @@ class AbrManifestService
         }
 
         // Fallback estimation based on resolution
-        $width = is_object($profile) && method_exists($profile, 'getAttribute') 
-            ? $profile->getAttribute('width') 
+        $width = is_object($profile) && method_exists($profile, 'getAttribute')
+            ? $profile->getAttribute('width')
             : $profile->width ?? 1280;
-        $height = is_object($profile) && method_exists($profile, 'getAttribute') 
-            ? $profile->getAttribute('height') 
+        $height = is_object($profile) && method_exists($profile, 'getAttribute')
+            ? $profile->getAttribute('height')
             : $profile->height ?? 720;
         $pixels = $width * $height;
 
@@ -196,9 +214,9 @@ class AbrManifestService
             ->toArray();
 
         $fallbackProfiles = $this->generateFallbackProfiles($availableProfiles);
-        
+
         $video->update(['abr_profiles' => $fallbackProfiles]);
-        
+
         Log::info("ABR profiles updated for video: {$video->getAttribute('id')}", [
             'profiles' => array_keys($fallbackProfiles)
         ]);
@@ -209,12 +227,12 @@ class AbrManifestService
      */
     private function generateFallbackProfiles(array $availableProfiles): array
     {
-        $allProfiles = config('video.default_profiles', []);
+        $allProfiles = config('orbit-video.default_profiles', []);
         $fallbackProfiles = [];
-        
+
         // Convert to collection for easier manipulation
         $availableCollection = collect($availableProfiles);
-        
+
         // Sort available profiles by quality (resolution * framerate)
         $sortedAvailable = $availableCollection->sortByDesc(function ($profile) {
             return ($profile['width'] ?? 0) * ($profile['height'] ?? 0) * ($profile['framerate'] ?? 30);
@@ -249,8 +267,8 @@ class AbrManifestService
             $profileHeight = $profile['height'] ?? 0;
             $profileFramerate = $profile['framerate'] ?? 30;
 
-            return $profileWidth <= $requestedWidth && 
-                   $profileHeight <= $requestedHeight && 
+            return $profileWidth <= $requestedWidth &&
+                   $profileHeight <= $requestedHeight &&
                    $profileFramerate <= $requestedFramerate;
         });
 
@@ -261,5 +279,14 @@ class AbrManifestService
 
         // No suitable profile found, return the lowest quality available
         return $availableProfiles->last()['path'] ?? '';
+    }
+
+    /**
+     * Get video directory path for manifests.
+     */
+    private function getVideoDirectory(Video $video): string
+    {
+        $videoId = $video->getAttribute('id');
+        return "videos/{$videoId}";
     }
 }

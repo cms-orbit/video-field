@@ -9,12 +9,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Support\Facades\Storage;
+use CmsOrbit\VideoField\Traits\VideoStorageTrait;
 use CmsOrbit\VideoField\Entities\Video\Video;
 use CmsOrbit\VideoField\Entities\Video\VideoEncodingLog;
+use function Pest\Laravel\delete;
 
 class VideoProfile extends Model
 {
-    use HasUuids;
+    use HasUuids, VideoStorageTrait;
 
     /**
      * The table associated with the model.
@@ -22,19 +24,13 @@ class VideoProfile extends Model
     protected $table = 'video_profiles';
 
     /**
-     * The attributes that are mass assignable.
+     * The attributes that aren't mass assignable.
      */
-    protected $fillable = [
-        'video_id',
-        'field',
-        'profile',
-        'path',
-        'encoded',
-        'file_size',
-        'width',
-        'height',
-        'framerate',
-        'bitrate',
+    protected $guarded = [
+        'id',
+        'uuid',
+        'created_at',
+        'updated_at',
     ];
 
     /**
@@ -77,35 +73,67 @@ class VideoProfile extends Model
      */
     public function getUrl(): ?string
     {
-        return $this->path ? Storage::disk(config('video.storage.disk'))->url($this->path) : null;
+        return $this->generateStorageUrl($this->getAttribute('path'));
     }
 
     /**
-     * Generate profile file path with videoId placeholder.
+     * Generate profile path for this video profile.
      */
     public function generateProfilePath(): string
     {
-        $videoId = $this->video?->getAttribute('id') ?? $this->getAttribute('video_id');
-        $videoPath = config('video.storage.video_path');
-        $basePath = \Str::replace('{videoId}', (string) $videoId, $videoPath);
-
-        return $basePath . '/' . $this->getAttribute('profile') . '.mp4';
+        $videoId = $this->video->getAttribute('id');
+        $profileName = $this->getAttribute('profile');
+        $extension = 'mp4'; // Default extension for video profiles
+        
+        return "videos/{$videoId}/profiles/{$profileName}.{$extension}";
     }
 
     /**
-     * Get human readable file size.
+     * Generate HLS directory path for this video profile.
      */
-    public function getReadableSize(): string
+    public function generateHlsDirectory(): string
     {
-        $bytes = $this->file_size;
-        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
-
-        for ($i = 0; $bytes > 1024 && $i < count($units) - 1; $i++) {
-            $bytes /= 1024;
-        }
-
-        return round($bytes, 2) . ' ' . $units[$i];
+        $videoId = $this->video->getAttribute('id');
+        $profileName = $this->getAttribute('profile');
+        
+        return "videos/{$videoId}/hls/{$profileName}";
     }
+
+    /**
+     * Generate DASH directory path for this video profile.
+     */
+    public function generateDashDirectory(): string
+    {
+        $videoId = $this->video->getAttribute('id');
+        $profileName = $this->getAttribute('profile');
+        
+        return "videos/{$videoId}/dash/{$profileName}";
+    }
+
+    /**
+     * Get HLS playlist URL for this profile.
+     */
+    public function getHlsUrl(): ?string
+    {
+        $path = $this->getAttribute('hls_path');
+        if (!$path) return null;
+
+        $disk = config('orbit-video.storage.disk');
+        return Storage::disk($disk)->url($path);
+    }
+
+    /**
+     * Get DASH manifest URL for this profile.
+     */
+    public function getDashUrl(): ?string
+    {
+        $path = $this->getAttribute('dash_path');
+        if (!$path) return null;
+
+        $disk = config('orbit-video.storage.disk');
+        return Storage::disk($disk)->url($path);
+    }
+
 
     /**
      * Get profile resolution as string.
@@ -147,5 +175,18 @@ class VideoProfile extends Model
     public function getLatestLog(): ?VideoEncodingLog
     {
         return $this->encodingLogs()->latest()->first();
+    }
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        self::deleted(function (VideoProfile $profile) {
+            $disk = config('orbit-video.storage.disk', 'public');
+            $videoPath = $profile->getAttribute('path');
+            if (Storage::disk($disk)->exists($videoPath)) {
+                Storage::disk($disk)->deleteDirectory($videoPath);
+            }
+        });
     }
 }

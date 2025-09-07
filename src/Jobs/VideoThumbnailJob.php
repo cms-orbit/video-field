@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace CmsOrbit\VideoField\Jobs;
 
 use CmsOrbit\VideoField\Entities\Video\Video;
+use CmsOrbit\VideoField\Traits\VideoJobTrait;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -16,7 +17,7 @@ use Exception;
 
 class VideoThumbnailJob implements ShouldQueue
 {
-    use Queueable, InteractsWithQueue, SerializesModels;
+    use Queueable, InteractsWithQueue, SerializesModels, VideoJobTrait;
 
     public $timeout = 300; // 5 minutes
     public $tries = 2;
@@ -49,19 +50,19 @@ class VideoThumbnailJob implements ShouldQueue
     public function handle(): void
     {
         try {
-            Log::info("Starting thumbnail generation for video: {$this->video->getAttribute('id')}");
+            $videoId = $this->video->getAttribute('id');
+            $this->logJobStart('thumbnail generation', $videoId);
 
             $success = $this->generateThumbnail();
 
             if ($success) {
-                Log::info("Thumbnail generation completed for video: {$this->video->getAttribute('id')}");
+                $this->logJobCompletion('thumbnail generation', $videoId);
             } else {
-                Log::error("Thumbnail generation failed for video: {$this->video->getAttribute('id')}");
+                $this->logJobError('thumbnail generation', $videoId, 'Thumbnail generation process failed');
             }
 
         } catch (Exception $e) {
-            Log::error("Thumbnail generation job exception for video: {$this->video->getAttribute('id')}", [
-                'error' => $e->getMessage(),
+            $this->logJobError('thumbnail generation', $this->video->getAttribute('id'), $e->getMessage(), [
                 'trace' => $e->getTraceAsString()
             ]);
             throw $e;
@@ -86,7 +87,7 @@ class VideoThumbnailJob implements ShouldQueue
         try {
             // Check if thumbnail already exists
             if ($this->video->getAttribute('thumbnail_path') && !$this->force) {
-                $disk = config('video.storage.disk');
+                $disk = config('orbit-video.storage.disk');
                 if (Storage::disk($disk)->exists($this->video->getAttribute('thumbnail_path'))) {
                     Log::info("Thumbnail already exists for video: {$this->video->getAttribute('id')}");
                     return true;
@@ -95,14 +96,20 @@ class VideoThumbnailJob implements ShouldQueue
 
             // Check if FFmpeg is available
             if (!$this->checkFFmpeg()) {
-                Log::error('FFmpeg not found');
+                $this->logJobError('thumbnail generation', $this->video->getAttribute('id'), 'FFmpeg not found');
                 return false;
             }
 
             // Find original file
-            $originalPath = $this->findOriginalFile();
-            if (!$originalPath) {
-                Log::error('Original video file not found');
+            try {
+                $originalPath = $this->video->getVideoPath();
+            } catch (Exception $e) {
+                $this->logJobError('thumbnail generation', $this->video->getAttribute('id'), 'Failed to get video path: ' . $e->getMessage());
+                return false;
+            }
+
+            if (!$originalPath || !file_exists($originalPath)) {
+                $this->logJobError('thumbnail generation', $this->video->getAttribute('id'), 'Original video file not found at: ' . $originalPath);
                 return false;
             }
 
@@ -132,24 +139,13 @@ class VideoThumbnailJob implements ShouldQueue
         }
     }
 
-    /**
-     * Check if FFmpeg is available.
-     */
-    private function checkFFmpeg(): bool
-    {
-        $ffmpegPath = config('video.ffmpeg.binary_path', 'ffmpeg');
-        $process = new Process([$ffmpegPath, '-version']);
-        $process->run();
-
-        return $process->isSuccessful();
-    }
 
     /**
      * Find the original video file.
      */
     private function findOriginalFile(): ?string
     {
-        $disk = config('video.storage.disk');
+        $disk = config('orbit-video.storage.disk');
         $videoPath = $this->video->getVideoPath();
 
         $patterns = [
@@ -173,7 +169,7 @@ class VideoThumbnailJob implements ShouldQueue
     {
         try {
             // Get thumbnail configuration
-            $thumbnailConfig = config('video.thumbnails');
+            $thumbnailConfig = config('orbit-video.thumbnails');
             $format = $thumbnailConfig['format'] ?? 'jpeg';
             $quality = $thumbnailConfig['quality'] ?? 85;
 
@@ -183,14 +179,12 @@ class VideoThumbnailJob implements ShouldQueue
             $thumbnailPath = $thumbnailDir . '/' . $thumbnailFilename;
 
             // Get full paths
-            $disk = config('video.storage.disk');
+            $disk = config('orbit-video.storage.disk');
             $fullThumbnailPath = Storage::disk($disk)->path($thumbnailPath);
 
             // Ensure thumbnail directory exists
             $thumbnailDirectory = dirname($fullThumbnailPath);
-            if (!is_dir($thumbnailDirectory)) {
-                mkdir($thumbnailDirectory, 0755, true);
-            }
+            $this->ensureDirectoryExists($thumbnailDirectory);
 
             // Build FFmpeg command
             $command = $this->buildThumbnailCommand($originalPath, $fullThumbnailPath, $captureTime, $quality, $format);
@@ -228,7 +222,7 @@ class VideoThumbnailJob implements ShouldQueue
      */
     private function buildThumbnailCommand(string $inputPath, string $outputPath, int $captureTime, int $quality, string $format): array
     {
-        $ffmpegPath = config('video.ffmpeg.binary_path', 'ffmpeg');
+        $ffmpegPath = config('orbit-video.ffmpeg.binary_path', 'ffmpeg');
 
         $command = [
             $ffmpegPath,
@@ -262,20 +256,4 @@ class VideoThumbnailJob implements ShouldQueue
         return $command;
     }
 
-    /**
-     * Format file size for display.
-     */
-    private function formatFileSize(int $bytes): string
-    {
-        $units = ['B', 'KB', 'MB', 'GB'];
-        $size = $bytes;
-        $unitIndex = 0;
-
-        while ($size > 1024 && $unitIndex < count($units) - 1) {
-            $size /= 1024;
-            $unitIndex++;
-        }
-
-        return round($size, 2) . ' ' . $units[$unitIndex];
-    }
 }

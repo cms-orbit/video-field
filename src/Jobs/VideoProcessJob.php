@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace CmsOrbit\VideoField\Jobs;
 
 use CmsOrbit\VideoField\Entities\Video\Video;
+use CmsOrbit\VideoField\Traits\VideoJobTrait;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -15,23 +16,23 @@ use Exception;
 
 class VideoProcessJob implements ShouldQueue
 {
-    use Queueable, InteractsWithQueue, SerializesModels;
+    use Queueable, InteractsWithQueue, SerializesModels, VideoJobTrait;
 
     public $timeout = 7200; // 2 hours
     public $tries = 2;
 
     protected Video $video;
     protected bool $force;
-    protected ?string $profileFilter;
+    protected ?array $modelProfiles;
 
     /**
      * Create a new job instance.
      */
-    public function __construct(Video $video, bool $force = false, ?string $profileFilter = null)
+    public function __construct(Video $video, bool $force = false, ?array $modelProfiles = null)
     {
         $this->video = $video;
         $this->force = $force;
-        $this->profileFilter = $profileFilter;
+        $this->modelProfiles = $modelProfiles;
     }
 
     /**
@@ -48,7 +49,8 @@ class VideoProcessJob implements ShouldQueue
     public function handle(): void
     {
         try {
-            Log::info("Starting complete video processing for video: {$this->video->getAttribute('id')}");
+            $videoId = $this->video->getAttribute('id');
+            $this->logJobStart('video processing', $videoId);
 
             // Update video status
             $this->video->update(['status' => 'processing']);
@@ -56,12 +58,11 @@ class VideoProcessJob implements ShouldQueue
             // Chain jobs in sequence
             $this->processVideoSequentially();
 
-            Log::info("Video processing job chain started for video: {$this->video->getAttribute('id')}");
+            $this->logJobCompletion('video processing job chain started', $videoId);
 
         } catch (Exception $e) {
             $this->video->update(['status' => 'failed']);
-            Log::error("Video processing job exception for video: {$this->video->getAttribute('id')}", [
-                'error' => $e->getMessage(),
+            $this->logJobError('video processing', $this->video->getAttribute('id'), $e->getMessage(), [
                 'trace' => $e->getTraceAsString()
             ]);
             throw $e;
@@ -75,9 +76,7 @@ class VideoProcessJob implements ShouldQueue
     {
         $this->video->update(['status' => 'failed']);
 
-        Log::error("Video processing job failed for video: {$this->video->getAttribute('id')}", [
-            'error' => $exception->getMessage()
-        ]);
+        $this->logJobError('video processing', $this->video->getAttribute('id'), $exception->getMessage());
     }
 
     /**
@@ -85,10 +84,10 @@ class VideoProcessJob implements ShouldQueue
      */
     private function processVideoSequentially(): void
     {
-        $queueName = config('video.queue.queue_name', 'encode_video');
+        $queueName = config('orbit-video.queue.queue_name', 'encode_video');
 
         // Create jobs
-        $encodeJob = (new VideoEncodeJob($this->video, $this->profileFilter, $this->force))
+        $encodeJob = (new VideoEncodeJob($this->video, $this->modelProfiles, $this->force))
             ->onQueue($queueName);
 
         $thumbnailJob = (new VideoThumbnailJob($this->video, 5, $this->force))
@@ -96,7 +95,7 @@ class VideoProcessJob implements ShouldQueue
 
         $spriteJob = (new VideoSpriteJob($this->video, 100, 10, 10, $this->force))
             ->onQueue($queueName);
-            
+
         $manifestJob = (new VideoManifestJob($this->video))
             ->onQueue($queueName);
 

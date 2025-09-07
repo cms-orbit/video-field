@@ -18,6 +18,8 @@ return new class extends Migration
             $table->string('field'); // 필드명 (opening, video1, video2 등)
             $table->string('profile'); // 프로파일명 (4K@60fps, FHD@30fps 등)
             $table->string('path')->nullable(); // 인코딩된 파일 경로
+            $table->string('hls_path')->nullable(); // HLS 플레이리스트 경로
+            $table->string('dash_path')->nullable(); // DASH 매니페스트 경로
             $table->boolean('encoded')->default(false); // 인코딩 완료 여부
             $table->enum('status', ['pending', 'processing', 'completed', 'failed'])->default('pending');
             $table->bigInteger('file_size')->nullable(); // 파일 크기 (bytes)

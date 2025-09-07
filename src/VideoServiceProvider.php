@@ -10,10 +10,9 @@ use App\Lang\LoadLangTrait;
 use App\Services\CmsHelper;
 use App\Services\ThemePathRegister;
 use Illuminate\Support\ServiceProvider;
+use CmsOrbit\VideoField\Observers\VideoObserver;
+use CmsOrbit\VideoField\Entities\Video\Video;
 use CmsOrbit\VideoField\Console\Commands\VideoEncodeCommand;
-use CmsOrbit\VideoField\Console\Commands\VideoThumbnailCommand;
-use CmsOrbit\VideoField\Console\Commands\VideoSpriteCommand;
-use CmsOrbit\VideoField\Console\Commands\VideoProcessAllCommand;
 
 class VideoServiceProvider extends ServiceProvider
 {
@@ -27,14 +26,11 @@ class VideoServiceProvider extends ServiceProvider
     {
         // 설정 파일 병합
         $this->mergeConfigFrom(
-            __DIR__.'/../config/video.php', 'video'
+            __DIR__.'/../config/orbit-video.php', 'orbit-video'
         );
 
         // 마이그레이션 로드
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
-
-        // API 라우트 로드
-        $this->loadRoutesFrom(__DIR__.'/../routes/api.php');
 
         // 프론트엔드 경로 등록
         $this->registerFrontendPaths();
@@ -56,31 +52,31 @@ class VideoServiceProvider extends ServiceProvider
 
         // 설정 파일 발행
         $this->publishes([
-            __DIR__.'/../config/video.php' => config_path('video.php'),
-        ], 'video-config');
+            __DIR__.'/../config/orbit-video.php' => config_path('orbit-video.php'),
+        ], 'orbit-video-config');
 
         // 마이그레이션 발행
         $this->publishes([
             __DIR__.'/../database/migrations' => database_path('migrations'),
-        ], 'video-migrations');
+        ], 'orbit-video-migrations');
 
         // 언어 파일 발행
         $this->publishes([
             __DIR__.'/../resources/lang' => resource_path('lang'),
-        ], 'video-lang');
+        ], 'orbit-video-lang');
 
-        // Register commands
+        // Register view namespace
+        $this->loadViewsFrom(__DIR__ . '/../resources/views', 'cms-orbit-video');
+
+        // Register model observers
+        Video::observe(VideoObserver::class);
+
+        // Register console commands
         if ($this->app->runningInConsole()) {
             $this->commands([
                 VideoEncodeCommand::class,
-                VideoThumbnailCommand::class,
-                VideoSpriteCommand::class,
-                VideoProcessAllCommand::class,
             ]);
         }
-
-        // Register view namespace
-        $this->loadViewsFrom(__DIR__ . '/resources/views', 'video-field');
     }
 
     /**
@@ -89,16 +85,19 @@ class VideoServiceProvider extends ServiceProvider
      */
     protected function registerFrontendPaths(): void
     {
-        // Vite 별칭 등록 - 테마에서 @orbit/video로 접근 가능
-        $frontendPath = new ThemePathRegister(
-            '@orbit/video',
-            __DIR__ . '/../resources/js'
-        );
-        BuildThemeScripts::registerPath($frontendPath);
+        // Register Stimulus controllers for Orchid fields
+        if ($this->app->runningInConsole()) {
+            // Vite 별칭 등록 - 테마에서 @orbit/video로 접근 가능
+            $frontendPath = new ThemePathRegister(
+                '@orbit/video',
+                __DIR__ . '/../resources/js'
+            );
+            BuildThemeScripts::registerPath($frontendPath);
 
-        // Tailwind CSS 경로 등록
-        BuildThemeScripts::registerTailwindBase(
-            __DIR__ . '/../resources/js/**/**/*.vue'
-        );
+            // Tailwind CSS 경로 등록
+            BuildThemeScripts::registerTailwindBase(
+                __DIR__ . '/../resources/js/**/**/*.vue'
+            );
+        }
     }
 }

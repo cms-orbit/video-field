@@ -7,7 +7,7 @@ namespace CmsOrbit\VideoField\Traits;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use CmsOrbit\VideoField\Entities\Video\Video;
 
-trait HasVideoField
+trait HasVideos
 {
     /**
      * Default video profiles configuration.
@@ -148,7 +148,7 @@ trait HasVideoField
     public function getVideoSprite(string $field): ?string
     {
         $video = $this->getVideo($field);
-        return $video?->getScrubbiingSpriteUrl();
+        return $video?->getScrubbingSpriteUrl();
     }
 
     /**
@@ -239,7 +239,7 @@ trait HasVideoField
             'status' => $video->getAttribute('status'),
             'encoding_progress' => $video->getEncodingProgress(),
             'thumbnail_url' => $video->getThumbnailUrl(),
-            'sprite_url' => $video->getScrubbiingSpriteUrl(),
+            'sprite_url' => $video->getScrubbingSpriteUrl(),
             'profiles' => $video->profiles->map(function ($profile) {
                 return [
                     'profile' => $profile->getAttribute('profile'),

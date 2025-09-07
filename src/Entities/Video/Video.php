@@ -7,14 +7,22 @@ namespace CmsOrbit\VideoField\Entities\Video;
 use App\Services\DynamicModel;
 use App\Services\Traits\HasPermissions;
 use App\Services\Traits\SettingMenuItemTrait;
+use CmsOrbit\VideoField\Traits\VideoStorageTrait;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
+use Orchid\Attachment\Models\Attachment;
+use Exception;
 
+/**
+ * @property Attachment $originalFile
+ */
 class Video extends DynamicModel
 {
-    use SettingMenuItemTrait, HasPermissions;
+    use SettingMenuItemTrait, HasPermissions, VideoStorageTrait;
 
     /**
      * The table associated with the model.
@@ -22,30 +30,12 @@ class Video extends DynamicModel
     protected $table = 'videos';
 
     /**
-     * The attributes that are mass assignable.
+     * The attributes that aren't mass assignable.
      */
-    protected $fillable = [
-        'title',
-        'description',
-        'original_filename',
-        'original_size',
-        'duration',
-        'original_width',
-        'original_height',
-        'original_framerate',
-        'original_bitrate',
-        'thumbnail_path',
-        'scrubbing_sprite_path',
-        'sprite_columns',
-        'sprite_rows',
-        'sprite_interval',
-        'hls_manifest_path',
-        'dash_manifest_path',
-        'abr_profiles',
-        'mime_type',
-        'status',
-        'user_id',
-        'meta_data',
+    protected $guarded = [
+        'id',
+        'created_at',
+        'updated_at',
     ];
 
     /**
@@ -58,9 +48,6 @@ class Video extends DynamicModel
         'original_framerate' => 'float',
         'original_bitrate' => 'integer',
         'original_size' => 'integer',
-        'sprite_columns' => 'integer',
-        'sprite_rows' => 'integer',
-        'sprite_interval' => 'integer',
         'user_id' => 'integer',
         'meta_data' => 'array',
         'abr_profiles' => 'array',
@@ -82,6 +69,11 @@ class Video extends DynamicModel
         return 5020;
     }
 
+    public function originalFile(): BelongsTo
+    {
+        return $this->belongsTo(Attachment::class, 'original_file_id');
+    }
+
     /**
      * Get the video profiles for this video.
      */
@@ -96,6 +88,14 @@ class Video extends DynamicModel
     public function encodingLogs(): HasManyThrough
     {
         return $this->hasManyThrough(VideoEncodingLog::class, VideoProfile::class);
+    }
+
+    /**
+     * Get the related models for this video.
+     */
+    public function relatedModels(): HasMany
+    {
+        return $this->hasMany(VideoFieldRelation::class);
     }
 
     /**
@@ -117,7 +117,7 @@ class Video extends DynamicModel
             ->where('encoded', true)
             ->first();
 
-        return $videoProfile ? Storage::disk(config('video.storage.disk'))->url($videoProfile->path) : null;
+        return $videoProfile ? Storage::disk(config('orbit-video.storage.disk'))->url($videoProfile->path) : null;
     }
 
     /**
@@ -125,15 +125,16 @@ class Video extends DynamicModel
      */
     public function getThumbnailUrl(): ?string
     {
-        return $this->thumbnail_path ? Storage::disk(config('video.storage.disk'))->url($this->thumbnail_path) : null;
+        return $this->generateStorageUrl($this->getAttribute('thumbnail_path'));
     }
 
     /**
      * Get scrubbing sprite URL.
      */
-    public function getScrubbiingSpriteUrl(): ?string
+    public function getScrubbingSpriteUrl(): ?string
     {
-        return $this->scrubbing_sprite_path ? Storage::disk(config('video.storage.disk'))->url($this->scrubbing_sprite_path) : null;
+        $metadata = $this->getSpriteMetadata();
+        return $metadata['sprite']['url'] ?? null;
     }
 
     /**
@@ -141,8 +142,12 @@ class Video extends DynamicModel
      */
     public function getVideoPath(): string
     {
-        $basePath = config('video.storage.video_path');
-        return \Str::replace('{videoId}', (string) $this->getAttribute('id'), $basePath);
+        if (!$this->originalFile) {
+            throw new \Exception('Original file not found for video: ' . $this->getAttribute('id'));
+        }
+
+        $filePath = $this->originalFile->getAttribute('path') . $this->originalFile->getAttribute('name') . "." . $this->originalFile->getAttribute('extension');
+        return Storage::disk(config('orbit-video.storage.disk'))->path($filePath);
     }
 
     /**
@@ -150,8 +155,8 @@ class Video extends DynamicModel
      */
     public function getThumbnailPath(): string
     {
-        $basePath = config('video.storage.thumbnails_path');
-        return \Str::replace('{videoId}', (string) $this->getAttribute('id'), $basePath);
+        $basePath = config('orbit-video.storage.thumbnails_path');
+        return $this->replaceVideoIdInPath($basePath, $this->getAttribute('id'));
     }
 
     /**
@@ -159,8 +164,8 @@ class Video extends DynamicModel
      */
     public function getSpritePath(): string
     {
-        $basePath = config('video.storage.sprites_path');
-        return \Str::replace('{videoId}', (string) $this->getAttribute('id'), $basePath);
+        $basePath = config('orbit-video.storage.sprites_path');
+        return $this->replaceVideoIdInPath($basePath, $this->getAttribute('id'));
     }
 
     /**
@@ -204,20 +209,7 @@ class Video extends DynamicModel
         };
     }
 
-    /**
-     * Get human readable file size.
-     */
-    public function getReadableSize(): string
-    {
-        $bytes = $this->original_size;
-        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
 
-        for ($i = 0; $bytes > 1024 && $i < count($units) - 1; $i++) {
-            $bytes /= 1024;
-        }
-
-        return round($bytes, 2) . ' ' . $units[$i];
-    }
 
     /**
      * Get human readable duration.
@@ -243,7 +235,7 @@ class Video extends DynamicModel
      */
     public function hasThumbnail(): bool
     {
-        return !empty($this->thumbnail_path) && Storage::disk(config('video.storage.disk'))->exists($this->thumbnail_path);
+        return $this->storageFileExists($this->getAttribute('thumbnail_path'));
     }
 
     /**
@@ -251,7 +243,7 @@ class Video extends DynamicModel
      */
     public function hasSprite(): bool
     {
-        return !empty($this->scrubbing_sprite_path) && Storage::disk(config('video.storage.disk'))->exists($this->scrubbing_sprite_path);
+        return $this->storageFileExists($this->getAttribute('scrubbing_sprite_path'));
     }
 
     /**
@@ -263,13 +255,25 @@ class Video extends DynamicModel
             return [];
         }
 
-        return [
-            'url' => $this->getScrubbiingSpriteUrl(),
-            'columns' => $this->sprite_columns,
-            'rows' => $this->sprite_rows,
-            'interval' => $this->sprite_interval,
-            'total_frames' => $this->sprite_columns * $this->sprite_rows,
-        ];
+        $metadataPath = $this->getAttribute('scrubbing_sprite_path');
+        if (!$metadataPath) {
+            return [];
+        }
+
+        try {
+            $disk = config('orbit-video.storage.disk');
+            $fullPath = Storage::disk($disk)->path($metadataPath);
+            
+            if (!file_exists($fullPath)) {
+                return [];
+            }
+
+            $metadata = json_decode(file_get_contents($fullPath), true);
+            return $metadata ?: [];
+        } catch (Exception $e) {
+            Log::error("Failed to load sprite metadata: " . $e->getMessage());
+            return [];
+        }
     }
 
     /**
@@ -280,7 +284,7 @@ class Video extends DynamicModel
         $path = $this->getAttribute('hls_manifest_path');
         if (!$path) return null;
 
-        $disk = config('video.storage.disk');
+        $disk = config('orbit-video.storage.disk');
         return Storage::disk($disk)->url($path);
     }
 
@@ -292,8 +296,36 @@ class Video extends DynamicModel
         $path = $this->getAttribute('dash_manifest_path');
         if (!$path) return null;
 
-        $disk = config('video.storage.disk');
+        $disk = config('orbit-video.storage.disk');
         return Storage::disk($disk)->url($path);
+    }
+
+    /**
+     * Get the best quality HLS profile URL.
+     */
+    public function getBestHlsUrl(): ?string
+    {
+        $profile = $this->profiles()
+            ->where('encoded', true)
+            ->whereNotNull('hls_path')
+            ->orderBy('width', 'desc')
+            ->first();
+
+        return $profile ? $profile->getHlsUrl() : null;
+    }
+
+    /**
+     * Get the best quality DASH profile URL.
+     */
+    public function getBestDashUrl(): ?string
+    {
+        $profile = $this->profiles()
+            ->where('encoded', true)
+            ->whereNotNull('dash_path')
+            ->orderBy('width', 'desc')
+            ->first();
+
+        return $profile ? $profile->getDashUrl() : null;
     }
 
     /**
@@ -322,7 +354,7 @@ class Video extends DynamicModel
 
         if (!$path) return null;
 
-        $disk = config('video.storage.disk');
+        $disk = config('orbit-video.storage.disk');
         return Storage::disk($disk)->url($path);
     }
 
@@ -332,7 +364,7 @@ class Video extends DynamicModel
     public function supportsAbr(): bool
     {
         $profiles = $this->getAvailableProfiles();
-        return count($profiles) > 1;
+        return is_array($profiles) && count($profiles) > 1;
     }
 
     /**
@@ -351,5 +383,17 @@ class Video extends DynamicModel
             'profiles' => $this->getAvailableProfiles(),
             'supportsAbr' => $this->supportsAbr(),
         ];
+    }
+
+    /**
+     * Convert seconds to timecode format (HH:MM:SS.mmm).
+     */
+    public static function formatTimecode(float $seconds): string
+    {
+        $hours = (int) floor($seconds / 3600.0);
+        $minutes = (int) floor(fmod($seconds, 3600.0) / 60.0);
+        $secs = fmod($seconds, 60.0);
+        
+        return sprintf('%02d:%02d:%06.3f', $hours, $minutes, $secs);
     }
 }
