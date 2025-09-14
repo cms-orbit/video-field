@@ -47,6 +47,64 @@ class VideoEncodeJob implements ShouldQueue
     }
 
     /**
+     * Get profiles for video encoding.
+     * First tries to get profiles from related models using HasVideos trait,
+     * then falls back to modelProfiles parameter, then config default.
+     */
+    protected function getProfilesForVideo(): array
+    {
+        // First, try to get profiles from related models that use HasVideos trait
+        $relatedModels = $this->video->relatedModels()->with('model')->get();
+
+        foreach ($relatedModels as $relation) {
+            $model = $relation->model;
+            if ($model && method_exists($model, 'getAvailableVideoProfiles')) {
+                $modelProfiles = $model->getAvailableVideoProfiles();
+                if (!empty($modelProfiles)) {
+                    Log::info("Using profiles from related model: " . get_class($model));
+                    return $modelProfiles;
+                }
+            }
+        }
+
+        // Fall back to modelProfiles parameter if provided
+        if ($this->modelProfiles) {
+            Log::info("Using profiles from modelProfiles parameter");
+            return $this->modelProfiles;
+        }
+
+        // Finally, use config default
+        Log::info("Using default profiles from config");
+        return config('orbit-video.default_profiles', []);
+    }
+
+    /**
+     * Get encoding configuration for video processing.
+     * First tries to get config from related models using HasVideos trait,
+     * then falls back to config default.
+     */
+    protected function getEncodingConfigForVideo(): array
+    {
+        // First, try to get encoding config from related models that use HasVideos trait
+        $relatedModels = $this->video->relatedModels()->with('model')->get();
+
+        foreach ($relatedModels as $relation) {
+            $model = $relation->model;
+            if ($model && method_exists($model, 'getVideoEncodingSettings')) {
+                $modelConfig = $model->getVideoEncodingSettings();
+                if (!empty($modelConfig)) {
+                    Log::info("Using encoding config from related model: " . get_class($model));
+                    return $modelConfig;
+                }
+            }
+        }
+
+        // Fall back to config default
+        Log::info("Using default encoding config from config");
+        return config('orbit-video.default_encoding', []);
+    }
+
+    /**
      * Execute the job.
      */
     public function handle(): void
@@ -131,7 +189,7 @@ class VideoEncodeJob implements ShouldQueue
         ]);
 
         // Get profiles to encode - use model profiles if available, otherwise use config
-        $allProfiles = $this->modelProfiles ?? config('orbit-video.default_profiles', []);
+        $allProfiles = $this->getProfilesForVideo();
         $suitableProfiles = $this->selectSuitableProfiles($metadata, $allProfiles);
 
         if (empty($suitableProfiles)) {
@@ -175,7 +233,8 @@ class VideoEncodeJob implements ShouldQueue
             }
 
             // Create or update video profile record
-            $videoProfile = VideoProfile::updateOrCreate(
+            /** @var VideoProfile $videoProfile */
+            $videoProfile = VideoProfile::query()->updateOrCreate(
                 [
                     'video_id' => $this->video->getAttribute('id'),
                     'field' => 'default',
@@ -183,9 +242,6 @@ class VideoEncodeJob implements ShouldQueue
                 ],
                 [
                     'status' => 'processing',
-                    'export_progressive' => true,
-                    'export_hls' => true,
-                    'export_dash' => true,
                 ]
             );
 
@@ -322,12 +378,12 @@ class VideoEncodeJob implements ShouldQueue
         try {
             $ffmpegPath = config('orbit-video.ffmpeg.binary_path', 'ffmpeg');
             $disk = config('orbit-video.storage.disk');
-            
+
             // Progressive MP4 output path
             $mp4Path = $videoProfile->generateProfilePath();
             $fullMp4Path = Storage::disk($disk)->path($mp4Path);
             $this->ensureDirectoryExists(dirname($fullMp4Path));
-            
+
             $command = [
                 $ffmpegPath,
                 '-i', $originalPath,
@@ -383,15 +439,15 @@ class VideoEncodeJob implements ShouldQueue
         try {
             $ffmpegPath = config('orbit-video.ffmpeg.binary_path', 'ffmpeg');
             $disk = config('orbit-video.storage.disk');
-            
+
             // HLS output directory
             $hlsDir = $videoProfile->generateHlsDirectory();
             $fullHlsDir = Storage::disk($disk)->path($hlsDir);
             $this->ensureDirectoryExists($fullHlsDir);
-            
+
             // HLS segment duration (in seconds)
             $segmentDuration = 10;
-            
+
             $command = [
                 $ffmpegPath,
                 '-i', $originalPath,
@@ -446,15 +502,15 @@ class VideoEncodeJob implements ShouldQueue
         try {
             $ffmpegPath = config('orbit-video.ffmpeg.binary_path', 'ffmpeg');
             $disk = config('orbit-video.storage.disk');
-            
+
             // DASH output directory
             $dashDir = $videoProfile->generateDashDirectory();
             $fullDashDir = Storage::disk($disk)->path($dashDir);
             $this->ensureDirectoryExists($fullDashDir);
-            
+
             // DASH segment duration (in seconds)
             $segmentDuration = 10;
-            
+
             $command = [
                 $ffmpegPath,
                 '-i', $originalPath,

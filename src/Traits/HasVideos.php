@@ -9,65 +9,6 @@ use CmsOrbit\VideoField\Entities\Video\Video;
 
 trait HasVideos
 {
-    /**
-     * Default video profiles configuration.
-     */
-    protected array $defaultVideoProfiles = [
-        '4K@60fps' => [
-            'width' => 3840,
-            'height' => 2160,
-            'framerate' => 60,
-            'bitrate' => '15M',
-            'profile' => 'main10',
-            'level' => '5.1',
-            'codec' => 'libx264',
-        ],
-        '4K@30fps' => [
-            'width' => 3840,
-            'height' => 2160,
-            'framerate' => 30,
-            'bitrate' => '10M',
-            'profile' => 'main10',
-            'level' => '5.0',
-            'codec' => 'libx264',
-        ],
-        'FHD@60fps' => [
-            'width' => 1920,
-            'height' => 1080,
-            'framerate' => 60,
-            'bitrate' => '12M',
-            'profile' => 'main',
-            'level' => '4.1',
-            'codec' => 'libx264',
-        ],
-        'FHD@30fps' => [
-            'width' => 1920,
-            'height' => 1080,
-            'framerate' => 30,
-            'bitrate' => '8M',
-            'profile' => 'main',
-            'level' => '4.0',
-            'codec' => 'libx264',
-        ],
-        'HD@30fps' => [
-            'width' => 1280,
-            'height' => 720,
-            'framerate' => 30,
-            'bitrate' => '4M',
-            'profile' => 'main',
-            'level' => '3.1',
-            'codec' => 'libx264',
-        ],
-        'SD@30fps' => [
-            'width' => 640,
-            'height' => 480,
-            'framerate' => 30,
-            'bitrate' => '2M',
-            'profile' => 'main',
-            'level' => '3.0',
-            'codec' => 'libx264',
-        ],
-    ];
 
     /**
      * Get video profiles for this model.
@@ -75,7 +16,16 @@ trait HasVideos
      */
     protected function getVideoProfiles(): array
     {
-        return $this->defaultVideoProfiles;
+        return config('orbit-video.default_profiles', []);
+    }
+
+    /**
+     * Get encoding configuration for this model.
+     * Override this method in your model to customize encoding settings.
+     */
+    protected function getVideoEncodingConfig(): array
+    {
+        return config('orbit-video.default_encoding', []);
     }
 
     /**
@@ -214,6 +164,14 @@ trait HasVideos
     public function getAvailableVideoProfiles(): array
     {
         return $this->getVideoProfiles();
+    }
+
+    /**
+     * Get encoding configuration for video processing.
+     */
+    public function getVideoEncodingSettings(): array
+    {
+        return $this->getVideoEncodingConfig();
     }
 
     /**

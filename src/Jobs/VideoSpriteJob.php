@@ -500,7 +500,9 @@ class VideoSpriteJob implements ShouldQueue
     private function saveSpriteMetadata(array $metadata): string
     {
         $videoId = $this->video->getAttribute('id');
-        $metadataPath = "videos/{$videoId}/sprites/sprite_metadata.json";
+        $basePath = config('orbit-video.storage.sprites_path', 'videos/{videoId}/sprites');
+        $spritesPath = str_replace('{videoId}', (string) $videoId, $basePath);
+        $metadataPath = "{$spritesPath}/sprite_metadata.json";
         
         $disk = config('orbit-video.storage.disk');
         $fullMetadataPath = Storage::disk($disk)->path($metadataPath);

@@ -17,9 +17,13 @@ class AbrManifestService
     public function generateHlsManifest(Video $video): ?string
     {
         try {
+            // Check if HLS export is enabled in config
+            if (!config('orbit-video.default_encoding.export_hls', true)) {
+                return null;
+            }
+
             $profiles = $video->profiles()
                 ->where('encoded', true)
-                ->where('export_hls', true)
                 ->whereNotNull('hls_path')
                 ->orderBy('width', 'desc')
                 ->get();
@@ -55,9 +59,13 @@ class AbrManifestService
     public function generateDashManifest(Video $video): ?string
     {
         try {
+            // Check if DASH export is enabled in config
+            if (!config('orbit-video.default_encoding.export_dash', true)) {
+                return null;
+            }
+
             $profiles = $video->profiles()
                 ->where('encoded', true)
-                ->where('export_dash', true)
                 ->whereNotNull('dash_path')
                 ->orderBy('width', 'desc')
                 ->get();
@@ -224,9 +232,14 @@ class AbrManifestService
      */
     public function updateAbrProfiles(Video $video): void
     {
+        // Check if progressive export is enabled in config
+        if (!config('orbit-video.default_encoding.export_progressive', true)) {
+            $video->update(['abr_profiles' => []]);
+            return;
+        }
+
         $availableProfiles = $video->profiles()
             ->where('encoded', true)
-            ->where('export_progressive', true)
             ->whereNotNull('path')
             ->get()
             ->keyBy('profile')
@@ -315,7 +328,8 @@ class AbrManifestService
     private function getVideoDirectory(Video $video): string
     {
         $videoId = $video->getAttribute('id');
-        return "videos/{$videoId}";
+        $basePath = config('orbit-video.storage.video_path', 'videos/{videoId}');
+        return str_replace('{videoId}', (string) $videoId, $basePath);
     }
 
 }

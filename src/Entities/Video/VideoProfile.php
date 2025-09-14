@@ -14,6 +14,9 @@ use CmsOrbit\VideoField\Entities\Video\Video;
 use CmsOrbit\VideoField\Entities\Video\VideoEncodingLog;
 use function Pest\Laravel\delete;
 
+/**
+ * @property Video $video
+ */
 class VideoProfile extends Model
 {
     use HasUuids, VideoStorageTrait;
@@ -42,9 +45,6 @@ class VideoProfile extends Model
         'width' => 'integer',
         'height' => 'integer',
         'framerate' => 'integer',
-        'export_progressive' => 'boolean',
-        'export_hls' => 'boolean',
-        'export_dash' => 'boolean',
     ];
 
     /**
@@ -88,7 +88,10 @@ class VideoProfile extends Model
         $profileName = $this->getAttribute('profile');
         $extension = 'mp4'; // Default extension for video profiles
         
-        return "videos/{$videoId}/profiles/{$profileName}.{$extension}";
+        $basePath = config('orbit-video.storage.profiles_path', 'videos/{videoId}/profiles');
+        $path = $this->replaceVideoIdInPath($basePath, $videoId);
+        
+        return "{$path}/{$profileName}.{$extension}";
     }
 
     /**
@@ -99,7 +102,10 @@ class VideoProfile extends Model
         $videoId = $this->video->getAttribute('id');
         $profileName = $this->getAttribute('profile');
         
-        return "videos/{$videoId}/hls/{$profileName}";
+        $basePath = config('orbit-video.storage.hls_path', 'videos/{videoId}/hls');
+        $path = $this->replaceVideoIdInPath($basePath, $videoId);
+        
+        return "{$path}/{$profileName}";
     }
 
     /**
@@ -110,7 +116,10 @@ class VideoProfile extends Model
         $videoId = $this->video->getAttribute('id');
         $profileName = $this->getAttribute('profile');
         
-        return "videos/{$videoId}/dash/{$profileName}";
+        $basePath = config('orbit-video.storage.dash_path', 'videos/{videoId}/dash');
+        $path = $this->replaceVideoIdInPath($basePath, $videoId);
+        
+        return "{$path}/{$profileName}";
     }
 
     /**
@@ -175,23 +184,11 @@ class VideoProfile extends Model
     }
 
     /**
-     * Set export options for this profile.
-     */
-    public function setExportOptions(bool $progressive = true, bool $hls = true, bool $dash = true): self
-    {
-        $this->setAttribute('export_progressive', $progressive);
-        $this->setAttribute('export_hls', $hls);
-        $this->setAttribute('export_dash', $dash);
-        
-        return $this;
-    }
-
-    /**
      * Check if progressive download should be exported.
      */
     public function shouldExportProgressive(): bool
     {
-        return $this->getAttribute('export_progressive') ?? true;
+        return $this->getEncodingConfig()['export_progressive'] ?? true;
     }
 
     /**
@@ -199,7 +196,7 @@ class VideoProfile extends Model
      */
     public function shouldExportHls(): bool
     {
-        return $this->getAttribute('export_hls') ?? true;
+        return $this->getEncodingConfig()['export_hls'] ?? true;
     }
 
     /**
@@ -207,10 +204,33 @@ class VideoProfile extends Model
      */
     public function shouldExportDash(): bool
     {
-        return $this->getAttribute('export_dash') ?? true;
+        return $this->getEncodingConfig()['export_dash'] ?? true;
     }
 
-    protected static function boot()
+    /**
+     * Get encoding configuration for this video profile.
+     * First tries to get config from related models, then falls back to config default.
+     */
+    protected function getEncodingConfig(): array
+    {
+        // First, try to get encoding config from related models that use HasVideos trait
+        $relatedModels = $this->video->relatedModels()->with('model')->get();
+
+        foreach ($relatedModels as $relation) {
+            $model = $relation->model;
+            if ($model && method_exists($model, 'getVideoEncodingSettings')) {
+                $modelConfig = $model->getVideoEncodingSettings();
+                if (!empty($modelConfig)) {
+                    return $modelConfig;
+                }
+            }
+        }
+
+        // Fall back to config default
+        return config('orbit-video.default_encoding', []);
+    }
+
+    protected static function boot(): void
     {
         parent::boot();
 

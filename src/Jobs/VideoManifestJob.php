@@ -50,15 +50,18 @@ class VideoManifestJob implements ShouldQueue
 
             $manifestService = new AbrManifestService();
 
-            // Check if any profiles have HLS or DASH enabled
-            $hasHlsProfiles = $this->video->profiles()
-                ->where('export_hls', true)
+            // Check if HLS or DASH export is enabled in config
+            $exportHls = config('orbit-video.default_encoding.export_hls', true);
+            $exportDash = config('orbit-video.default_encoding.export_dash', true);
+
+            $hasHlsProfiles = $exportHls && $this->video->profiles()
                 ->where('encoded', true)
+                ->whereNotNull('hls_path')
                 ->exists();
 
-            $hasDashProfiles = $this->video->profiles()
-                ->where('export_dash', true)
+            $hasDashProfiles = $exportDash && $this->video->profiles()
                 ->where('encoded', true)
+                ->whereNotNull('dash_path')
                 ->exists();
 
             // Generate HLS manifest only if there are HLS profiles

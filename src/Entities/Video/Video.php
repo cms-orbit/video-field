@@ -297,9 +297,14 @@ class Video extends DynamicModel
      */
     public function getProgressiveUrl(): ?string
     {
+        $exportProgressive = config('orbit-video.default_encoding.export_progressive', true);
+        
+        if (!$exportProgressive) {
+            return null;
+        }
+
         $profile = $this->profiles()
             ->where('encoded', true)
-            ->where('export_progressive', true)
             ->whereNotNull('path')
             ->orderBy('width', 'desc')
             ->first();
@@ -376,10 +381,9 @@ class Video extends DynamicModel
         if ($profile && isset($availableProfiles[$profile])) {
             $path = $availableProfiles[$profile];
         } else {
-            // Get default profile (highest quality available with progressive MP4)
+            // Get default profile (highest quality available)
             $videoProfile = $this->profiles()
                 ->where('encoded', true)
-                ->where('export_progressive', true)
                 ->whereNotNull('path')
                 ->orderBy('width', 'desc')
                 ->first();

@@ -11,6 +11,9 @@ return [
         'video_path' => env('VIDEO_STORAGE_PATH', 'videos/{videoId}'),
         'thumbnails_path' => env('VIDEO_THUMBNAILS_PATH', 'videos/{videoId}/thumbnails'),
         'sprites_path' => env('VIDEO_SPRITES_PATH', 'videos/{videoId}/sprites'),
+        'profiles_path' => env('VIDEO_PROFILES_PATH', 'videos/{videoId}/profiles'),
+        'hls_path' => env('VIDEO_HLS_PATH', 'videos/{videoId}/hls'),
+        'dash_path' => env('VIDEO_DASH_PATH', 'videos/{videoId}/dash'),
     ],
 
     /*
@@ -43,6 +46,17 @@ return [
             'video/x-m4v',
         ],
         'chunk_size' => env('VIDEO_CHUNK_SIZE', 1048576), // 1MB
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Default Encoding Configuration
+    |--------------------------------------------------------------------------
+    */
+    'default_encoding' => [
+        'export_progressive' => env('VIDEO_EXPORT_PROGRESSIVE', true),
+        'export_hls' => env('VIDEO_EXPORT_HLS', true),
+        'export_dash' => env('VIDEO_EXPORT_DASH', true),
     ],
 
     /*
