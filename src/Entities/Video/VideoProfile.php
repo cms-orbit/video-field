@@ -42,6 +42,9 @@ class VideoProfile extends Model
         'width' => 'integer',
         'height' => 'integer',
         'framerate' => 'integer',
+        'export_progressive' => 'boolean',
+        'export_hls' => 'boolean',
+        'export_dash' => 'boolean',
     ];
 
     /**
@@ -169,6 +172,42 @@ class VideoProfile extends Model
     public function getLatestLog(): ?VideoEncodingLog
     {
         return $this->encodingLogs()->latest()->first();
+    }
+
+    /**
+     * Set export options for this profile.
+     */
+    public function setExportOptions(bool $progressive = true, bool $hls = true, bool $dash = true): self
+    {
+        $this->setAttribute('export_progressive', $progressive);
+        $this->setAttribute('export_hls', $hls);
+        $this->setAttribute('export_dash', $dash);
+        
+        return $this;
+    }
+
+    /**
+     * Check if progressive download should be exported.
+     */
+    public function shouldExportProgressive(): bool
+    {
+        return $this->getAttribute('export_progressive') ?? true;
+    }
+
+    /**
+     * Check if HLS should be exported.
+     */
+    public function shouldExportHls(): bool
+    {
+        return $this->getAttribute('export_hls') ?? true;
+    }
+
+    /**
+     * Check if DASH should be exported.
+     */
+    public function shouldExportDash(): bool
+    {
+        return $this->getAttribute('export_dash') ?? true;
     }
 
     protected static function boot()

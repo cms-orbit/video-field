@@ -1,6 +1,6 @@
 {
     "name": "cms-orbit/video-field",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "A comprehensive video upload and multi-encoding system for CMS-Orbit with streaming support, transcoding, and thumbnails",
     "type": "library",
     "license": "MIT",
@@ -41,5 +41,13 @@
         "sort-packages": true
     },
     "minimum-stability": "stable",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "scripts": {
+        "post-install-cmd": [
+            "@php -r \"if (class_exists('CmsOrbit\\\\VideoField\\\\VideoServiceProvider')) { (new CmsOrbit\\\\VideoField\\\\VideoServiceProvider(app()))->publishLibraries(); }\""
+        ],
+        "post-update-cmd": [
+            "@php -r \"if (class_exists('CmsOrbit\\\\VideoField\\\\VideoServiceProvider')) { (new CmsOrbit\\\\VideoField\\\\VideoServiceProvider(app()))->publishLibraries(); }\""
+        ]
+    }
 }

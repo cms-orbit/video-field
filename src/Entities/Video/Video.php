@@ -293,6 +293,44 @@ class Video extends DynamicModel
     }
 
     /**
+     * Get progressive MP4 URL.
+     */
+    public function getProgressiveUrl(): ?string
+    {
+        $profile = $this->profiles()
+            ->where('encoded', true)
+            ->where('export_progressive', true)
+            ->whereNotNull('path')
+            ->orderBy('width', 'desc')
+            ->first();
+
+        return $profile ? $profile->getUrl() : null;
+    }
+
+    /**
+     * Regenerate manifests for this video.
+     */
+    public function regenerateManifests(): void
+    {
+        $manifestService = new \CmsOrbit\VideoField\Services\AbrManifestService();
+        
+        // Generate HLS manifest
+        $hlsPath = $manifestService->generateHlsManifest($this);
+        if ($hlsPath) {
+            Log::info("HLS manifest regenerated: {$hlsPath}");
+        }
+
+        // Generate DASH manifest
+        $dashPath = $manifestService->generateDashManifest($this);
+        if ($dashPath) {
+            Log::info("DASH manifest regenerated: {$dashPath}");
+        }
+
+        // Update ABR profiles cache
+        $manifestService->updateAbrProfiles($this);
+    }
+
+    /**
      * Get the best quality HLS profile URL.
      */
     public function getBestHlsUrl(): ?string
@@ -338,10 +376,16 @@ class Video extends DynamicModel
         if ($profile && isset($availableProfiles[$profile])) {
             $path = $availableProfiles[$profile];
         } else {
-            // Get default profile (highest quality available)
-            $videoProfile = $this->profiles()->where('encoded', true)->orderBy('width', 'desc')->first();
+            // Get default profile (highest quality available with progressive MP4)
+            $videoProfile = $this->profiles()
+                ->where('encoded', true)
+                ->where('export_progressive', true)
+                ->whereNotNull('path')
+                ->orderBy('width', 'desc')
+                ->first();
+            
             if (!$videoProfile) return null;
-            $path = $videoProfile->generateProfilePath();
+            $path = $videoProfile->getAttribute('path');
         }
 
         if (!$path) return null;

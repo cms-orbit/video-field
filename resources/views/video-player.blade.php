@@ -2,22 +2,43 @@
     <div class="bg-white rounded-lg shadow-sm border p-6">
         <h3 class="text-lg font-semibold text-gray-900 mb-4">{{ __('Video Preview') }}</h3>
 
-        <div class="flex gap-x-3">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <!-- Progressive MP4 Test -->
+            @if($video->getProgressiveUrl())
+                <div class="border rounded-lg p-4">
+                    <h4 class="font-medium text-gray-800 mb-2">{{ __('Progressive MP4 Test') }}</h4>
+                    <div class="bg-gray-50 rounded p-3 mb-3">
+                        <code class="text-sm text-gray-600 break-all">{{ $video->getProgressiveUrl() }}</code>
+                    </div>
+                    <div class="video-player-container">
+                        <video
+                            id="progressive-player"
+                            controls
+                            class="w-full"
+                            style="max-height: 300px;"
+                            preload="metadata">
+                            <source src="{{ $video->getProgressiveUrl() }}" type="video/mp4">
+                            {{ __('Your browser does not support MP4 video playback.') }}
+                        </video>
+                    </div>
+                </div>
+            @endif
+
             <!-- HLS Stream Test -->
-            @if($video->getBestHlsUrl())
+            @if($video->getHlsManifestUrl())
                 <div class="border rounded-lg p-4">
                     <h4 class="font-medium text-gray-800 mb-2">{{ __('HLS Stream Test') }}</h4>
                     <div class="bg-gray-50 rounded p-3 mb-3">
-                        <code class="text-sm text-gray-600 break-all">{{ $video->getBestHlsUrl() }}</code>
+                        <code class="text-sm text-gray-600 break-all">{{ $video->getHlsManifestUrl() }}</code>
                     </div>
                     <div class="video-player-container">
                         <video
                             id="hls-player"
                             controls
-                            class="w-full max-w-2xl"
-                            style="max-height: 400px;"
+                            class="w-full"
+                            style="max-height: 300px;"
                             preload="metadata">
-                            <source src="{{ $video->getBestHlsUrl() }}" type="application/x-mpegURL">
+                            <source src="{{ $video->getHlsManifestUrl() }}" type="application/x-mpegURL">
                             {{ __('Your browser does not support HLS video playback.') }}
                         </video>
                     </div>
@@ -25,20 +46,20 @@
             @endif
 
             <!-- DASH Stream Test -->
-            @if($video->getBestDashUrl())
+            @if($video->getDashManifestUrl())
                 <div class="border rounded-lg p-4">
                     <h4 class="font-medium text-gray-800 mb-2">{{ __('DASH Stream Test') }}</h4>
                     <div class="bg-gray-50 rounded p-3 mb-3">
-                        <code class="text-sm text-gray-600 break-all">{{ $video->getBestDashUrl() }}</code>
+                        <code class="text-sm text-gray-600 break-all">{{ $video->getDashManifestUrl() }}</code>
                     </div>
                     <div class="video-player-container">
                         <video
                             id="dash-player"
                             controls
-                            class="w-full max-w-2xl"
-                            style="max-height: 400px;"
+                            class="w-full"
+                            style="max-height: 300px;"
                             preload="metadata">
-                            <source src="{{ $video->getBestDashUrl() }}" type="application/dash+xml">
+                            <source src="{{ $video->getDashManifestUrl() }}" type="application/dash+xml">
                             {{ __('Your browser does not support DASH video playback.') }}
                         </video>
                     </div>
@@ -46,10 +67,10 @@
             @endif
 
             <!-- No streams available message -->
-            @if(!$video->getBestHlsUrl() && !$video->getBestDashUrl())
-                <div class="text-center py-8 text-gray-500">
+            @if(!$video->getProgressiveUrl() && !$video->getHlsManifestUrl() && !$video->getDashManifestUrl())
+                <div class="col-span-full text-center py-8 text-gray-500">
                     <div class="text-4xl mb-2">📹</div>
-                    <p>{{ __('No streaming formats available for this video.') }}</p>
+                    <p>{{ __('No video formats available for this video.') }}</p>
                     <p class="text-sm mt-1">{{ __('Please wait for encoding to complete or check the encoding status.') }}</p>
                 </div>
             @endif
@@ -72,10 +93,10 @@
     @endpush
 
     @push('scripts')
-    <!-- HLS.js CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-    <!-- Dash.js CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/dashjs@latest/dist/dash.all.min.js"></script>
+    <!-- HLS.js Local -->
+    <script src="{{ asset('vendor/cms-orbit/video/js/hls.js') }}"></script>
+    <!-- Dash.js Local -->
+    <script src="{{ asset('vendor/cms-orbit/video/js/dashjs.js') }}"></script>
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -190,40 +211,97 @@
                 const dashPlayer = document.getElementById('dash-player');
                 const dashUrl = dashPlayer.querySelector('source').src;
 
+                // DASH URL이 유효한지 확인
+                if (!dashUrl) {
+                    console.error('DASH URL is not available');
+                    return;
+                }
+
                 const dash = dashjs.MediaPlayer().create();
 
-                // ABR 설정 (지원되는 설정만 사용)
+                // DASH 설정 (기본 설정 사용)
                 dash.updateSettings({
                     'debug': {
-                        'logLevel': dashjs.Debug.LOG_LEVEL_NONE
-                    },
-                    'streaming': {
-                        'abr': {
-                            'autoSwitchBitrate': {
-                                'video': true,
-                                'audio': true
-                            },
-                            'useDeadTimeLatency': true,
-                            'usePixelRatioInLimitBitrateByPortal': true
-                        },
-                        'buffer': {
-                            'bufferTimeAtTopQuality': 30,
-                            'bufferTimeAtTopQualityLongForm': 60,
-                            'longFormContentDurationThreshold': 600,
-                            'stableBufferTime': 12
-                        }
+                        'logLevel': dashjs.Debug.LOG_LEVEL_WARNING
                     }
                 });
 
-                dash.initialize(dashPlayer, dashUrl, false);
-
+                // 에러 이벤트 핸들러 (SourceBuffer 관련 에러 필터링)
                 dash.on('error', function(e) {
+                    // SourceBuffer 관련 에러는 무시
+                    if (e.error && e.error.message && 
+                        (e.error.message.includes('SourceBuffer') || 
+                         e.error.message.includes('buffered') ||
+                         e.error.message.includes('removed from the parent media source'))) {
+                        return;
+                    }
+                    
                     console.error('DASH Error:', e);
+                    if (e.error && e.error.code === dashjs.MediaPlayer.errors.MANIFEST_ERROR) {
+                        console.error('DASH Manifest Error - URL may be invalid or manifest format is incorrect');
+                    }
+                });
+
+                // 스트림 로드 이벤트
+                dash.on('streamInitialized', function(e) {
+                    console.log('DASH Stream initialized:', e);
                 });
 
                 // 화질 전환 이벤트 로깅
                 dash.on('qualityChangeRequested', function(e) {
                     console.log('DASH Quality change requested:', e);
+                });
+
+                // 매니페스트 로드 이벤트
+                dash.on('manifestLoaded', function(e) {
+                    console.log('DASH Manifest loaded:', e);
+                });
+
+                // 플레이어 정리 이벤트
+                dash.on('streamDestroyed', function(e) {
+                    console.log('DASH Stream destroyed:', e);
+                });
+
+                // 재생 시작 이벤트
+                dash.on('playbackStarted', function(e) {
+                    console.log('DASH Playback started:', e);
+                });
+
+                // 재생 일시정지 이벤트
+                dash.on('playbackPaused', function(e) {
+                    console.log('DASH Playback paused:', e);
+                });
+
+                // 재생 완료 이벤트
+                dash.on('playbackEnded', function(e) {
+                    console.log('DASH Playback ended:', e);
+                });
+
+                // 스트림 로드 완료 이벤트
+                dash.on('streamCompleted', function(e) {
+                    console.log('DASH Stream completed:', e);
+                });
+
+                // DASH 플레이어 초기화 (기본 방식)
+                try {
+                    console.log('Initializing DASH player...');
+                    dash.initialize(dashPlayer, dashUrl, false);
+                } catch (error) {
+                    console.error('DASH initialization error:', error);
+                }
+
+                // 페이지 언로드 시 플레이어 정리
+                window.addEventListener('beforeunload', function() {
+                    if (dash && typeof dash.destroy === 'function') {
+                        dash.destroy();
+                    }
+                });
+
+                // 비디오 요소 정리 이벤트
+                dashPlayer.addEventListener('emptied', function() {
+                    if (dash && typeof dash.reset === 'function') {
+                        dash.reset();
+                    }
                 });
             }
         });

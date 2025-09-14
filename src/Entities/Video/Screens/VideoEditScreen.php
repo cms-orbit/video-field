@@ -47,6 +47,7 @@ class VideoEditScreen extends Screen
             'video.encoding_logs' => $video->encodingLogs()->latest()->limit(50)->get(),
             'video.hls_manifest_url' => $video->getHlsManifestUrl(),
             'video.dash_manifest_url' => $video->getDashManifestUrl(),
+            'video.progressive_url' => $video->getProgressiveUrl(),
             'video.thumbnail_url' => $video->getThumbnailUrl(),
             'video.supports_abr' => $video->supportsAbr(),
             'video.abr_profile_count' => count($video->getAvailableProfiles() ?? []),
@@ -87,6 +88,13 @@ class VideoEditScreen extends Screen
             ->method('save')
             ->class('btn btn-primary')
             ->canSee($this->video->exists || request()->has('video.title'));
+
+        // Regenerate Manifests 버튼 (인코딩이 완료된 경우)
+        $commands[] = Button::make(__('Regenerate Manifests'))
+            ->icon('bs.arrow-clockwise')
+            ->method('regenerateManifests')
+            ->class('btn btn-warning')
+            ->canSee($this->video->exists && $this->video->getAttribute('status') === 'completed');
 
         // Remove 버튼 (기존 비디오인 경우)
         $commands[] = Button::make(__('Remove'))
@@ -235,6 +243,21 @@ class VideoEditScreen extends Screen
         return [
             'profileLogsModal.logs' => json_encode($logsData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
         ];
+    }
+
+    /**
+     * Regenerate manifests for this video.
+     */
+    public function regenerateManifests(Video $video)
+    {
+        try {
+            $video->regenerateManifests();
+            Toast::success(__('Manifests have been regenerated successfully.'));
+        } catch (\Exception $e) {
+            Toast::error(__('Failed to regenerate manifests: ') . $e->getMessage());
+        }
+
+        return redirect()->route('settings.entities.videos.edit', $video);
     }
 
 }

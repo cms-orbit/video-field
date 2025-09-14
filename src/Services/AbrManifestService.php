@@ -19,6 +19,8 @@ class AbrManifestService
         try {
             $profiles = $video->profiles()
                 ->where('encoded', true)
+                ->where('export_hls', true)
+                ->whereNotNull('hls_path')
                 ->orderBy('width', 'desc')
                 ->get();
 
@@ -55,6 +57,8 @@ class AbrManifestService
         try {
             $profiles = $video->profiles()
                 ->where('encoded', true)
+                ->where('export_dash', true)
+                ->whereNotNull('dash_path')
                 ->orderBy('width', 'desc')
                 ->get();
 
@@ -119,10 +123,13 @@ class AbrManifestService
                    'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ' .
                    'type="static" ' .
                    'mediaPresentationDuration="PT' . $duration . 'S" ' .
-                   'profiles="urn:mpeg:dash:profile:isoff-main:2011">' . "\n";
+                   'profiles="urn:mpeg:dash:profile:isoff-main:2011" ' .
+                   'minBufferTime="PT2S">' . "\n";
 
         $content .= '  <Period>' . "\n";
-        $content .= '    <AdaptationSet mimeType="video/mp4" segmentAlignment="true">' . "\n";
+        
+        // Video AdaptationSet
+        $content .= '    <AdaptationSet mimeType="video/mp4" segmentAlignment="true" startWithSAP="1">' . "\n";
 
         foreach ($profiles as $profile) {
             $bandwidth = $this->estimateBandwidth($profile);
@@ -135,20 +142,39 @@ class AbrManifestService
                        'bandwidth="' . $bandwidth . '" ' .
                        'width="' . $width . '" ' .
                        'height="' . $height . '" ' .
-                       'frameRate="' . $framerate . '">' . "\n";
+                       'frameRate="' . $framerate . '" ' .
+                       'codecs="avc1.640028">' . "\n";
             
             // DASH에서는 각 프로필의 세그먼트 파일들을 직접 참조
             $dashPath = $profile->getAttribute('dash_path');
             if ($dashPath) {
-                // DASH 세그먼트 파일들의 패턴을 참조
+                // DASH 세그먼트 파일들의 패턴을 참조 (.m4s 확장자 사용, 5자리 패딩)
                 $profileName = basename(dirname($dashPath));
-                $content .= '        <SegmentTemplate media="dash/' . $profileName . '/segment_$Number$.mp4" ' .
-                           'startNumber="1" timescale="1000" duration="10000"/>' . "\n";
+                $content .= '        <SegmentTemplate media="dash/' . $profileName . '/chunk-stream0-$Number%05d$.m4s" ' .
+                           'startNumber="1" timescale="1000" duration="10000" ' .
+                           'initialization="dash/' . $profileName . '/init-stream0.m4s"/>' . "\n";
             }
             $content .= '      </Representation>' . "\n";
         }
 
         $content .= '    </AdaptationSet>' . "\n";
+        
+        // Audio AdaptationSet (if available)
+        $content .= '    <AdaptationSet mimeType="audio/mp4" segmentAlignment="true" startWithSAP="1">' . "\n";
+        $content .= '      <Representation id="audio" bandwidth="128000" codecs="mp4a.40.2">' . "\n";
+        
+        // Use the first profile's directory for audio segments
+        $firstProfile = $profiles->first();
+        if ($firstProfile) {
+            $profileName = basename(dirname($firstProfile->getAttribute('dash_path')));
+            $content .= '        <SegmentTemplate media="dash/' . $profileName . '/chunk-stream1-$Number%05d$.m4s" ' .
+                       'startNumber="1" timescale="1000" duration="10000" ' .
+                       'initialization="dash/' . $profileName . '/init-stream1.m4s"/>' . "\n";
+        }
+        
+        $content .= '      </Representation>' . "\n";
+        $content .= '    </AdaptationSet>' . "\n";
+        
         $content .= '  </Period>' . "\n";
         $content .= '</MPD>';
 
@@ -200,6 +226,8 @@ class AbrManifestService
     {
         $availableProfiles = $video->profiles()
             ->where('encoded', true)
+            ->where('export_progressive', true)
+            ->whereNotNull('path')
             ->get()
             ->keyBy('profile')
             ->map(function ($profile) {
@@ -208,7 +236,7 @@ class AbrManifestService
                     'width' => $profile->getAttribute('width'),
                     'height' => $profile->getAttribute('height'),
                     'framerate' => $profile->getAttribute('framerate'),
-                    'path' => $profile->generateProfilePath(),
+                    'path' => $profile->getAttribute('path'),
                 ];
             })
             ->toArray();

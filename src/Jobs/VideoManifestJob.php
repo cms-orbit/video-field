@@ -50,20 +50,37 @@ class VideoManifestJob implements ShouldQueue
 
             $manifestService = new AbrManifestService();
 
-            // Generate HLS manifest
-            $hlsPath = $manifestService->generateHlsManifest($this->video);
-            if ($hlsPath) {
-                Log::info("HLS manifest generated: {$hlsPath}");
+            // Check if any profiles have HLS or DASH enabled
+            $hasHlsProfiles = $this->video->profiles()
+                ->where('export_hls', true)
+                ->where('encoded', true)
+                ->exists();
+
+            $hasDashProfiles = $this->video->profiles()
+                ->where('export_dash', true)
+                ->where('encoded', true)
+                ->exists();
+
+            // Generate HLS manifest only if there are HLS profiles
+            if ($hasHlsProfiles) {
+                $hlsPath = $manifestService->generateHlsManifest($this->video);
+                if ($hlsPath) {
+                    Log::info("HLS manifest generated: {$hlsPath}");
+                }
             }
 
-            // Generate DASH manifest
-            $dashPath = $manifestService->generateDashManifest($this->video);
-            if ($dashPath) {
-                Log::info("DASH manifest generated: {$dashPath}");
+            // Generate DASH manifest only if there are DASH profiles
+            if ($hasDashProfiles) {
+                $dashPath = $manifestService->generateDashManifest($this->video);
+                if ($dashPath) {
+                    Log::info("DASH manifest generated: {$dashPath}");
+                }
             }
 
-            // Update ABR profiles cache
-            $manifestService->updateAbrProfiles($this->video);
+            // Update ABR profiles cache only if there are streaming profiles
+            if ($hasHlsProfiles || $hasDashProfiles) {
+                $manifestService->updateAbrProfiles($this->video);
+            }
 
             $this->logJobCompletion('manifest generation', $videoId);
 

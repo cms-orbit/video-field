@@ -77,6 +77,9 @@ class VideoServiceProvider extends ServiceProvider
                 VideoEncodeCommand::class,
             ]);
         }
+
+        // 라이브러리 자동 배포
+        $this->publishLibraries();
     }
 
     /**
@@ -98,6 +101,65 @@ class VideoServiceProvider extends ServiceProvider
             BuildThemeScripts::registerTailwindBase(
                 __DIR__ . '/../resources/js/**/**/*.vue'
             );
+        }
+    }
+
+    /**
+     * 라이브러리 자동 배포
+     */
+    public function publishLibraries(): void
+    {
+        $sourcePath = __DIR__ . '/../public';
+        $targetPath = public_path('vendor/cms-orbit/video');
+
+        // 디렉토리가 존재하지 않으면 생성
+        if (!is_dir($targetPath)) {
+            mkdir($targetPath, 0755, true);
+            mkdir($targetPath . '/js', 0755, true);
+            mkdir($targetPath . '/css', 0755, true);
+        }
+
+        // 라이브러리 파일들 복사
+        $this->copyLibraryFiles($sourcePath, $targetPath);
+    }
+
+    /**
+     * 라이브러리 파일들 복사
+     */
+    protected function copyLibraryFiles(string $sourcePath, string $targetPath): void
+    {
+        // Copy files in js directory
+        $jsSourceDir = $sourcePath . '/js';
+        $jsTargetDir = $targetPath . '/js';
+        if (is_dir($jsSourceDir)) {
+            if (!is_dir($jsTargetDir)) {
+                mkdir($jsTargetDir, 0755, true);
+            }
+            $jsFiles = glob($jsSourceDir . '/*.js');
+            foreach ($jsFiles as $sourceFile) {
+                $fileName = basename($sourceFile);
+                $targetFile = $jsTargetDir . '/' . $fileName;
+                if (!file_exists($targetFile) || filemtime($sourceFile) > filemtime($targetFile)) {
+                    copy($sourceFile, $targetFile);
+                }
+            }
+        }
+
+        // Copy files in css directory
+        $cssSourceDir = $sourcePath . '/css';
+        $cssTargetDir = $targetPath . '/css';
+        if (is_dir($cssSourceDir)) {
+            if (!is_dir($cssTargetDir)) {
+                mkdir($cssTargetDir, 0755, true);
+            }
+            $cssFiles = glob($cssSourceDir . '/*.css');
+            foreach ($cssFiles as $sourceFile) {
+                $fileName = basename($sourceFile);
+                $targetFile = $cssTargetDir . '/' . $fileName;
+                if (!file_exists($targetFile) || filemtime($sourceFile) > filemtime($targetFile)) {
+                    copy($sourceFile, $targetFile);
+                }
+            }
         }
     }
 }

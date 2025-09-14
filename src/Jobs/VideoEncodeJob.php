@@ -183,6 +183,9 @@ class VideoEncodeJob implements ShouldQueue
                 ],
                 [
                     'status' => 'processing',
+                    'export_progressive' => true,
+                    'export_hls' => true,
+                    'export_dash' => true,
                 ]
             );
 
@@ -194,11 +197,27 @@ class VideoEncodeJob implements ShouldQueue
                 'ffmpeg_command' => 'Building command...',
             ]);
 
-            // Encode both HLS and DASH formats
-            $hlsSuccess = $this->encodeHlsProfile($videoProfile, $originalPath, $profileConfig, $encodingLog);
-            $dashSuccess = $this->encodeDashProfile($videoProfile, $originalPath, $profileConfig, $encodingLog);
+            // Encode formats based on export options
+            $progressiveSuccess = false;
+            $hlsSuccess = false;
+            $dashSuccess = false;
 
-            if ($hlsSuccess || $dashSuccess) {
+            // Encode progressive MP4 if enabled
+            if ($videoProfile->shouldExportProgressive()) {
+                $progressiveSuccess = $this->encodeProgressiveProfile($videoProfile, $originalPath, $profileConfig, $encodingLog);
+            }
+
+            // Encode HLS if enabled
+            if ($videoProfile->shouldExportHls()) {
+                $hlsSuccess = $this->encodeHlsProfile($videoProfile, $originalPath, $profileConfig, $encodingLog);
+            }
+
+            // Encode DASH if enabled
+            if ($videoProfile->shouldExportDash()) {
+                $dashSuccess = $this->encodeDashProfile($videoProfile, $originalPath, $profileConfig, $encodingLog);
+            }
+
+            if ($progressiveSuccess || $hlsSuccess || $dashSuccess) {
                 // Update profile and log
                 $videoProfile->update([
                     'status' => 'completed',
@@ -293,6 +312,67 @@ class VideoEncodeJob implements ShouldQueue
         }
 
         return $suitable;
+    }
+
+    /**
+     * Encode progressive MP4 profile.
+     */
+    private function encodeProgressiveProfile(VideoProfile $videoProfile, string $originalPath, array $config, $encodingLog): bool
+    {
+        try {
+            $ffmpegPath = config('orbit-video.ffmpeg.binary_path', 'ffmpeg');
+            $disk = config('orbit-video.storage.disk');
+            
+            // Progressive MP4 output path
+            $mp4Path = $videoProfile->generateProfilePath();
+            $fullMp4Path = Storage::disk($disk)->path($mp4Path);
+            $this->ensureDirectoryExists(dirname($fullMp4Path));
+            
+            $command = [
+                $ffmpegPath,
+                '-i', $originalPath,
+                '-c:v', $config['codec'] ?? 'libx264',
+                '-b:v', $config['bitrate'],
+                '-r', (string)$config['framerate'],
+                '-profile:v', $config['profile'] ?? 'main',
+                '-level', $config['level'] ?? '4.0',
+                '-s', "{$config['width']}x{$config['height']}",
+                '-c:a', 'aac',
+                '-b:a', '128k',
+                '-movflags', '+faststart', // Enable progressive download
+                '-y', // Overwrite output file
+                $fullMp4Path
+            ];
+
+            // Update log with actual command
+            $encodingLog->update(['ffmpeg_command' => implode(' ', $command)]);
+
+            Log::info("Starting progressive MP4 encoding for profile: {$videoProfile->getAttribute('profile')}");
+
+            // Execute FFmpeg
+            $process = new Process($command);
+            $process->setTimeout(3600); // 1 hour timeout
+            $process->run();
+
+            if ($process->isSuccessful()) {
+                // Update profile with MP4 path and file size
+                $fileSize = file_exists($fullMp4Path) ? filesize($fullMp4Path) : null;
+                $videoProfile->update([
+                    'path' => $mp4Path,
+                    'file_size' => $fileSize
+                ]);
+                Log::info("Progressive MP4 profile {$videoProfile->getAttribute('profile')} encoded successfully");
+                return true;
+            } else {
+                $errorOutput = $process->getErrorOutput();
+                Log::error("Progressive MP4 profile {$videoProfile->getAttribute('profile')} encoding failed: {$errorOutput}");
+                return false;
+            }
+
+        } catch (Exception $e) {
+            Log::error("Exception encoding progressive MP4 profile {$videoProfile->getAttribute('profile')}: " . $e->getMessage());
+            return false;
+        }
     }
 
     /**
