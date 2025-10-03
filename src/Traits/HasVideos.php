@@ -6,9 +6,46 @@ namespace CmsOrbit\VideoField\Traits;
 
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use CmsOrbit\VideoField\Entities\Video\Video;
+use Illuminate\Support\Facades\Log;
 
 trait HasVideos
 {
+    /**
+     * Boot the trait and add model events.
+     */
+    protected static function bootHasVideos(): void
+    {
+        static::saved(function ($model) {
+            $model->handleVideoFieldsAfterSave();
+        });
+    }
+
+    /**
+     * Handle video fields after model is saved.
+     */
+    protected function handleVideoFieldsAfterSave(): void
+    {
+        if (!request()->has('video_fields_processed')) {
+            return;
+        }
+
+        foreach ($this->getVideoFields() as $fieldName) {
+            $videoData = request()->input($fieldName);
+            
+            if ($videoData) {
+                $videoData = json_decode($videoData, true);
+                
+                if (isset($videoData['video_id'])) {
+                    $video = Video::find($videoData['video_id']);
+                    if ($video) {
+                        $this->replaceVideo($fieldName, $video);
+                    }
+                }
+            } else {
+                $this->detachVideo($fieldName);
+            }
+        }
+    }
 
     /**
      * Get video profiles for this model.
@@ -43,8 +80,7 @@ trait HasVideos
     public function videos(): BelongsToMany
     {
         return $this->belongsToMany(Video::class, 'video_field_relations')
-            ->withPivot(['field_name', 'sort_order'])
-            ->wherePivot('model_type', static::class)
+            ->withPivot(['field_name', 'sort_order', 'model_type', 'model_id'])
             ->orderByPivot('sort_order');
     }
 
@@ -53,9 +89,17 @@ trait HasVideos
      */
     public function getVideo(string $field): ?Video
     {
-        return $this->videos()
-            ->wherePivot('field_name', $field)
+        $relation = \DB::table('video_field_relations')
+            ->where('model_type', static::class)
+            ->where('model_id', $this->getAttribute('id'))
+            ->where('field_name', $field)
             ->first();
+
+        if (!$relation) {
+            return null;
+        }
+
+        return Video::find($relation->video_id);
     }
 
     /**
@@ -63,15 +107,24 @@ trait HasVideos
      */
     public function getVideos(array $fields = []): \Illuminate\Database\Eloquent\Collection
     {
-        $query = $this->videos();
+        $query = \DB::table('video_field_relations')
+            ->where('model_type', static::class)
+            ->where('model_id', $this->getAttribute('id'));
 
         if (!empty($fields)) {
-            $query->whereIn('video_field_relations.field_name', $fields);
+            $query->whereIn('field_name', $fields);
         } elseif (!empty($this->getVideoFields())) {
-            $query->whereIn('video_field_relations.field_name', $this->getVideoFields());
+            $query->whereIn('field_name', $this->getVideoFields());
         }
 
-        return $query->get();
+        $relations = $query->get();
+        $videoIds = $relations->pluck('video_id')->toArray();
+
+        if (empty($videoIds)) {
+            return collect();
+        }
+
+        return Video::whereIn('id', $videoIds)->get();
     }
 
     /**
@@ -132,10 +185,14 @@ trait HasVideos
      */
     public function attachVideo(string $field, Video $video, int $sortOrder = 0): void
     {
-        $this->videos()->attach($video->getAttribute('id'), [
+        \DB::table('video_field_relations')->insert([
+            'video_id' => $video->getAttribute('id'),
+            'model_type' => static::class,
+            'model_id' => $this->getAttribute('id'),
             'field_name' => $field,
             'sort_order' => $sortOrder,
-            'model_type' => static::class,
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
     }
 
@@ -144,9 +201,11 @@ trait HasVideos
      */
     public function detachVideo(string $field): void
     {
-        $this->videos()
-            ->wherePivot('field_name', $field)
-            ->detach();
+        \DB::table('video_field_relations')
+            ->where('model_type', static::class)
+            ->where('model_id', $this->getAttribute('id'))
+            ->where('field_name', $field)
+            ->delete();
     }
 
     /**
@@ -154,7 +213,10 @@ trait HasVideos
      */
     public function replaceVideo(string $field, Video $video, int $sortOrder = 0): void
     {
+        // 기존 관계 삭제
         $this->detachVideo($field);
+        
+        // 새 관계 추가
         $this->attachVideo($field, $video, $sortOrder);
     }
 

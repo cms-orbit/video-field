@@ -102,7 +102,7 @@ class Video extends DynamicModel
      */
     public function models(): MorphToMany
     {
-        return $this->morphedByMany('App\Services\DynamicModel', 'model', 'video_field_relations')
+        return $this->morphedByMany(null, 'model', 'video_field_relations')
             ->withPivot(['field_name', 'sort_order']);
     }
 
@@ -214,7 +214,7 @@ class Video extends DynamicModel
      */
     public function getReadableDuration(): string
     {
-        $seconds = $this->duration;
+        $seconds = $this->getAttribute('duration');
         $hours = floor($seconds / 3600);
         $minutes = floor(($seconds % 3600) / 60);
         $seconds = $seconds % 60;
@@ -298,18 +298,16 @@ class Video extends DynamicModel
     public function getProgressiveUrl(): ?string
     {
         $exportProgressive = config('orbit-video.default_encoding.export_progressive', true);
-        
+
         if (!$exportProgressive) {
             return null;
         }
 
-        $profile = $this->profiles()
+        return $this->profiles()
             ->where('encoded', true)
             ->whereNotNull('path')
             ->orderBy('width', 'desc')
-            ->first();
-
-        return $profile ? $profile->getUrl() : null;
+            ->first()?->getUrl();
     }
 
     /**
@@ -318,7 +316,7 @@ class Video extends DynamicModel
     public function regenerateManifests(): void
     {
         $manifestService = new \CmsOrbit\VideoField\Services\AbrManifestService();
-        
+
         // Generate HLS manifest
         $hlsPath = $manifestService->generateHlsManifest($this);
         if ($hlsPath) {
@@ -333,34 +331,6 @@ class Video extends DynamicModel
 
         // Update ABR profiles cache
         $manifestService->updateAbrProfiles($this);
-    }
-
-    /**
-     * Get the best quality HLS profile URL.
-     */
-    public function getBestHlsUrl(): ?string
-    {
-        $profile = $this->profiles()
-            ->where('encoded', true)
-            ->whereNotNull('hls_path')
-            ->orderBy('width', 'desc')
-            ->first();
-
-        return $profile ? $profile->getHlsUrl() : null;
-    }
-
-    /**
-     * Get the best quality DASH profile URL.
-     */
-    public function getBestDashUrl(): ?string
-    {
-        $profile = $this->profiles()
-            ->where('encoded', true)
-            ->whereNotNull('dash_path')
-            ->orderBy('width', 'desc')
-            ->first();
-
-        return $profile ? $profile->getDashUrl() : null;
     }
 
     /**
@@ -387,7 +357,7 @@ class Video extends DynamicModel
                 ->whereNotNull('path')
                 ->orderBy('width', 'desc')
                 ->first();
-            
+
             if (!$videoProfile) return null;
             $path = $videoProfile->getAttribute('path');
         }
@@ -403,8 +373,7 @@ class Video extends DynamicModel
      */
     public function supportsAbr(): bool
     {
-        $profiles = $this->getAvailableProfiles();
-        return is_array($profiles) && count($profiles) > 1;
+        return count($this->getAvailableProfiles()) > 1;
     }
 
     /**
@@ -425,15 +394,8 @@ class Video extends DynamicModel
         ];
     }
 
-    /**
-     * Convert seconds to timecode format (HH:MM:SS.mmm).
-     */
-    public static function formatTimecode(float $seconds): string
+    public function getDeletedAtFormattedAttribute(): string
     {
-        $hours = (int) floor($seconds / 3600.0);
-        $minutes = (int) floor(fmod($seconds, 3600.0) / 60.0);
-        $secs = fmod($seconds, 60.0);
-
-        return sprintf('%02d:%02d:%06.3f', $hours, $minutes, $secs);
+        return $this->getAttribute('deleted_at')?->diffForHumans();
     }
 }

@@ -69,14 +69,47 @@ class VideoObserver
     public function forceDeleting(Video $video): void
     {
         try {
+            // delete all profiles
             $video->profiles()->delete();
-            $video->originalFile->delete();
 
-            $disk = config('orbit-video.storage.disk', 'public');
-            $videoPath = $video->getVideoPath();
-            if (Storage::disk($disk)->exists($videoPath)) {
-                Storage::disk($disk)->deleteDirectory($videoPath);
+            // Delete the original file attachment
+            if ($video->originalFile) {
+                $video->originalFile->delete();
             }
+
+            // Clean up storage directories
+            $disk = config('orbit-video.storage.disk', 'public');
+            $videoId = $video->getAttribute('id');
+
+            // config에서 경로를 불러와 {videoId}를 치환
+            $basePaths = [
+                str_replace('{videoId}', (string) $videoId, config('orbit-video.storage.video_path', "videos/{videoId}")),
+                str_replace('{videoId}', (string) $videoId, config('orbit-video.storage.profiles_path', "videos/{videoId}/profiles")),
+                str_replace('{videoId}', (string) $videoId, config('orbit-video.storage.hls_path', "videos/{videoId}/hls")),
+                str_replace('{videoId}', (string) $videoId, config('orbit-video.storage.dash_path', "videos/{videoId}/dash")),
+                str_replace('{videoId}', (string) $videoId, config('orbit-video.storage.thumbnails_path', "videos/{videoId}/thumbnails")),
+                str_replace('{videoId}', (string) $videoId, config('orbit-video.storage.sprites_path', "videos/{videoId}/sprites")),
+            ];
+
+            foreach ($basePaths as $path) {
+                if (Storage::disk($disk)->exists($path)) {
+                    Log::info('Video file found', [
+                        'video_id' => $video->getAttribute('id'),
+                        'path' => $path,
+                    ]);
+                    Storage::disk($disk)->deleteDirectory($path);
+                }else{
+                    Log::warning('Video file not found', [
+                        'video_id' => $video->getAttribute('id'),
+                        'path' => $path,
+                    ]);
+                }
+            }
+
+            Log::info('Video files cleaned up successfully', [
+                'video_id' => $video->getAttribute('id'),
+                'title' => $video->getAttribute('title'),
+            ]);
         } catch (\Throwable $e) {
             Log::warning('Failed to cleanup video files on delete', [
                 'video_id' => $video->getAttribute('id'),

@@ -32,6 +32,9 @@ class VideoServiceProvider extends ServiceProvider
         // 마이그레이션 로드
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
 
+        // API 라우트 로드
+        $this->loadRoutesFrom(__DIR__.'/../routes/api.php');
+
         // 프론트엔드 경로 등록
         $this->registerFrontendPaths();
 
@@ -67,6 +70,7 @@ class VideoServiceProvider extends ServiceProvider
 
         // Register view namespace
         $this->loadViewsFrom(__DIR__ . '/../resources/views', 'cms-orbit-video');
+        $this->loadViewsFrom(__DIR__ . '/Fields/VideoField', 'cms-orbit-video-field');
 
         // Register model observers
         Video::observe(VideoObserver::class);
@@ -102,6 +106,8 @@ class VideoServiceProvider extends ServiceProvider
                 __DIR__ . '/../resources/js/**/**/*.vue'
             );
         }
+
+        BuildThemeScripts::registerController('video',__DIR__ . '/Fields/VideoField/js/video_controller.js');
     }
 
     /**

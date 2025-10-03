@@ -104,6 +104,13 @@ class VideoEditScreen extends Screen
             ->class('btn btn-danger')
             ->canSee($this->video->exists);
 
+        // Trash 버튼 (기존 비디오인 경우)
+        $commands[] = Button::make(__('Trash'))
+            ->icon('bs.trash3')
+            ->route('settings.entities.videos.trash')
+            ->class('btn btn-secondary')
+            ->canSee($this->video->exists);
+
         return $commands;
     }
 

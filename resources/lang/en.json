@@ -45,5 +45,7 @@
     "Processing video": "Processing video",
     "Encoding profiles": "Encoding profiles",
     "All processing completed successfully": "All processing completed successfully",
-    "Some steps failed during processing": "Some steps failed during processing"
+    "Some steps failed during processing": "Some steps failed during processing",
+    "Uploaded Video": "Uploaded Video",
+    "Remove video": "Remove video"
 }
