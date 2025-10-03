@@ -1,6 +1,9 @@
 <?php
 
+use CmsOrbit\VideoField\Entities\Video\VideoFieldRelation;
+
 return [
+    'video_field_relation_model' => VideoFieldRelation::class,
     /*
     |--------------------------------------------------------------------------
     | Video Storage Configuration

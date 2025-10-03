@@ -113,6 +113,11 @@ class Post extends Model
     use HasVideos;
     
     // 비디오와의 관계는 자동으로 설정됩니다
+    
+    // 비디오 필드를 구성하기위해, Global Scope를 통해 eager loading 하므로 필요하다면, videos 관계를 숨길 수 있습니다.
+    protected $hidden = [
+        'videos'
+    ];
 }
 ```
 

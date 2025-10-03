@@ -12,12 +12,10 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('video_field_relations', function (Blueprint $table) {
-            $table->id();
             $table->unsignedBigInteger('video_id');
             $table->morphs('model'); // model_type, model_id
             $table->string('field_name'); // 필드명 (opening, video1, video2 등)
             $table->integer('sort_order')->default(0); // 정렬 순서
-            $table->timestamps();
 
             // 외래키
             $table->foreign('video_id')->references('id')->on('videos')->onDelete('cascade');

@@ -28,22 +28,22 @@
             @if(!$withoutExists)
                 <div class="mb-4" data-video-target="searchSection">
                     <label class="form-label">{{ __('Select Existing Video') }}</label>
-                    
+
                     <!-- Search Input -->
                     <div class="mb-3">
-                        <input 
-                            type="text" 
-                            class="form-control" 
+                        <input
+                            type="text"
+                            class="form-control"
                             placeholder="{{ $placeholder ?? __('Search videos...') }}"
                             data-video-target="search"
                             data-action="input->video#searchVideos"
                         />
                     </div>
-                    
+
                     <!-- Video Select Dropdown -->
                     <div class="mb-3">
-                        <select 
-                            class="form-select" 
+                        <select
+                            class="form-select"
                             data-video-target="videoSelect"
                             data-action="change->video#onVideoSelect"
                         >

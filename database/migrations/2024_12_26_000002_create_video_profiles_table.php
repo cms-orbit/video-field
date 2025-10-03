@@ -15,7 +15,6 @@ return new class extends Migration
             $table->id();
             $table->uuid()->unique();
             $table->unsignedBigInteger('video_id');
-            $table->string('field'); // 필드명 (opening, video1, video2 등)
             $table->string('profile'); // 프로파일명 (4K@60fps, FHD@30fps 등)
             $table->string('path')->nullable(); // 인코딩된 파일 경로
             $table->string('hls_path')->nullable(); // HLS 플레이리스트 경로
@@ -33,13 +32,11 @@ return new class extends Migration
             $table->foreign('video_id')->references('id')->on('videos')->onDelete('cascade');
 
             // 인덱스
-            $table->index(['video_id', 'field']);
-            $table->index(['video_id', 'profile']);
             $table->index(['encoded']);
             $table->index(['profile']);
 
             // 유니크 제약 조건 (같은 비디오, 필드, 프로파일 조합은 유일해야 함)
-            $table->unique(['video_id', 'field', 'profile']);
+            $table->unique(['video_id', 'profile']);
         });
     }
 

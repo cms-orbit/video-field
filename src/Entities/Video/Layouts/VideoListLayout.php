@@ -186,7 +186,7 @@ class VideoListLayout extends Table
         if ($user && $user->hasAccess('settings.entities.videos.delete')) {
             $actions[] = Button::make(__('Delete'))
                 ->confirm(__('Are you sure you want to delete this video?'))
-                ->method('remove', ['id' => $video->getKey()])
+                ->method('remove', ['video' => $video->getKey()])
                 ->icon('bs.trash3');
         }
         return $actions;

@@ -237,7 +237,6 @@ class VideoEncodeJob implements ShouldQueue
             $videoProfile = VideoProfile::query()->updateOrCreate(
                 [
                     'video_id' => $this->video->getAttribute('id'),
-                    'field' => 'default',
                     'profile' => $profileName,
                 ],
                 [

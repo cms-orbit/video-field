@@ -25,8 +25,6 @@ class VideoField extends Field
         'ajaxUrl' => '',
         'recentUrl' => '',
         'group' => 'video',
-        'storage' => 'public',
-        'path' => '',
         'count' => 1,
         'size' => 500,
         'uploadUrl' => '/settings/systems/files',
@@ -57,6 +55,12 @@ class VideoField extends Field
         'errorSize',
         'errorType'
     ];
+
+    public function __construct()
+    {
+        $this->attributes['storage'] = config('orbit-video.storage.disk');
+        $this->attributes['path'] = sprintf('orbit-video-original/%s', date('Y/m/d'));
+    }
 
     /**
      * Disable upload functionality.

@@ -10,9 +10,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Support\Facades\Storage;
 use CmsOrbit\VideoField\Traits\VideoStorageTrait;
-use CmsOrbit\VideoField\Entities\Video\Video;
-use CmsOrbit\VideoField\Entities\Video\VideoEncodingLog;
-use function Pest\Laravel\delete;
 
 /**
  * @property Video $video
@@ -87,10 +84,10 @@ class VideoProfile extends Model
         $videoId = $this->video->getAttribute('id');
         $profileName = $this->getAttribute('profile');
         $extension = 'mp4'; // Default extension for video profiles
-        
+
         $basePath = config('orbit-video.storage.profiles_path', 'videos/{videoId}/profiles');
         $path = $this->replaceVideoIdInPath($basePath, $videoId);
-        
+
         return "{$path}/{$profileName}.{$extension}";
     }
 
@@ -101,10 +98,10 @@ class VideoProfile extends Model
     {
         $videoId = $this->video->getAttribute('id');
         $profileName = $this->getAttribute('profile');
-        
+
         $basePath = config('orbit-video.storage.hls_path', 'videos/{videoId}/hls');
         $path = $this->replaceVideoIdInPath($basePath, $videoId);
-        
+
         return "{$path}/{$profileName}";
     }
 
@@ -115,10 +112,10 @@ class VideoProfile extends Model
     {
         $videoId = $this->video->getAttribute('id');
         $profileName = $this->getAttribute('profile');
-        
+
         $basePath = config('orbit-video.storage.dash_path', 'videos/{videoId}/dash');
         $path = $this->replaceVideoIdInPath($basePath, $videoId);
-        
+
         return "{$path}/{$profileName}";
     }
 

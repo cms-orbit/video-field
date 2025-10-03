@@ -4,35 +4,14 @@ declare(strict_types=1);
 
 namespace CmsOrbit\VideoField\Entities\Video;
 
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphPivot;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
 
-class VideoFieldRelation extends Model
+class VideoFieldRelation extends MorphPivot
 {
-    /**
-     * The table associated with the model.
-     */
     protected $table = 'video_field_relations';
-
-    /**
-     * The attributes that are mass assignable.
-     */
-    protected $fillable = [
-        'video_id',
-        'model_type',
-        'model_id',
-        'field_name',
-        'sort_order',
-    ];
-
-    /**
-     * The attributes that should be cast.
-     */
-    protected $casts = [
-        'video_id' => 'integer',
-        'model_id' => 'integer',
-        'sort_order' => 'integer',
-    ];
+    protected $guarded = [];
 
     /**
      * Get the video that owns this relation.
@@ -45,8 +24,8 @@ class VideoFieldRelation extends Model
     /**
      * Get the related model.
      */
-    public function model()
+    public function model(): MorphTo
     {
         return $this->morphTo();
     }
-} 
+}

@@ -10,7 +10,7 @@ use CmsOrbit\VideoField\Entities\Video\Layouts\VideoListLayout;
 use App\Settings\Extends\OrbitLayout;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Orchid\Screen\Actions\Button;
+use Orchid\Screen\Actions\Link;
 use Orchid\Screen\Actions\ModalToggle;
 use Orchid\Screen\Layouts\Modal;
 use Orchid\Screen\Screen;
@@ -27,8 +27,7 @@ class VideoListScreen extends Screen
     {
         return [
             'videos' => Video::filters()
-                ->defaultSort('id', 'desc')
-                ->where('deleted_at', null)
+                ->defaultSort('sort_order', 'desc')
                 ->with(['profiles'])
                 ->paginate(),
             'trash_count' => Video::onlyTrashed()->count(),
@@ -63,13 +62,10 @@ class VideoListScreen extends Screen
                 ->method('handleUpload')
                 ->class('btn btn-primary'),
 
-            Button::make(__('Trash'))
+            Link::make(sprintf("%s (%d)",__('Trash'),$this->query()['trash_count']))
                 ->icon('bs.trash3')
-                ->route('settings.entities.videos.trash')
-                ->class('btn btn-secondary')
-                ->parameters([
-                    'count' => $this->query()['trash_count']
-                ]),
+                ->href(route('settings.entities.videos.trash'))
+                ->class('btn btn-secondary'),
         ];
     }
 

@@ -8,6 +8,7 @@ use App\Services\DynamicModel;
 use App\Services\Traits\HasPermissions;
 use App\Services\Traits\SettingMenuItemTrait;
 use CmsOrbit\VideoField\Traits\VideoStorageTrait;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
@@ -19,6 +20,7 @@ use Exception;
 
 /**
  * @property Attachment $originalFile
+ * @property Collection|VideoProfile[] $profiles
  */
 class Video extends DynamicModel
 {
