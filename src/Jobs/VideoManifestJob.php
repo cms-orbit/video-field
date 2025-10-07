@@ -54,6 +54,12 @@ class VideoManifestJob implements ShouldQueue
             $exportHls = config('orbit-video.default_encoding.export_hls', true);
             $exportDash = config('orbit-video.default_encoding.export_dash', true);
 
+            $this->logDebug("Checking for encoded profiles", [
+                'video_id' => $videoId,
+                'hls_enabled' => $exportHls,
+                'dash_enabled' => $exportDash,
+            ]);
+
             $hasHlsProfiles = $exportHls && $this->video->profiles()
                 ->where('encoded', true)
                 ->whereNotNull('hls_path')
@@ -64,32 +70,62 @@ class VideoManifestJob implements ShouldQueue
                 ->whereNotNull('dash_path')
                 ->exists();
 
+            $this->logInfo("Profile availability checked", [
+                'video_id' => $videoId,
+                'has_hls_profiles' => $hasHlsProfiles,
+                'has_dash_profiles' => $hasDashProfiles,
+            ]);
+
             // Generate HLS manifest only if there are HLS profiles
             if ($hasHlsProfiles) {
+                $this->logDebug("Generating HLS manifest", ['video_id' => $videoId]);
                 $hlsPath = $manifestService->generateHlsManifest($this->video);
                 if ($hlsPath) {
-                    Log::info("HLS manifest generated: {$hlsPath}");
+                    $this->logInfo("HLS manifest generated successfully", [
+                        'video_id' => $videoId,
+                        'hls_manifest_path' => $hlsPath,
+                    ]);
+                } else {
+                    $this->logWarning("HLS manifest generation returned null", ['video_id' => $videoId]);
                 }
+            } else {
+                $this->logDebug("Skipping HLS manifest generation - no profiles available", ['video_id' => $videoId]);
             }
 
             // Generate DASH manifest only if there are DASH profiles
             if ($hasDashProfiles) {
+                $this->logDebug("Generating DASH manifest", ['video_id' => $videoId]);
                 $dashPath = $manifestService->generateDashManifest($this->video);
                 if ($dashPath) {
-                    Log::info("DASH manifest generated: {$dashPath}");
+                    $this->logInfo("DASH manifest generated successfully", [
+                        'video_id' => $videoId,
+                        'dash_manifest_path' => $dashPath,
+                    ]);
+                } else {
+                    $this->logWarning("DASH manifest generation returned null", ['video_id' => $videoId]);
                 }
+            } else {
+                $this->logDebug("Skipping DASH manifest generation - no profiles available", ['video_id' => $videoId]);
             }
 
             // Update ABR profiles cache only if there are streaming profiles
             if ($hasHlsProfiles || $hasDashProfiles) {
+                $this->logDebug("Updating ABR profiles cache", ['video_id' => $videoId]);
                 $manifestService->updateAbrProfiles($this->video);
+                $this->logInfo("ABR profiles cache updated", ['video_id' => $videoId]);
             }
 
-            $this->logJobCompletion('manifest generation', $videoId);
+            $this->logJobCompletion('manifest generation', $videoId, [
+                'hls_generated' => $hasHlsProfiles,
+                'dash_generated' => $hasDashProfiles,
+            ]);
 
             // If all profiles are encoded, mark video as completed
             if ($this->video->isFullyEncoded()) {
                 $this->video->update(['status' => 'completed']);
+                $this->logInfo("Video fully encoded - status updated to completed", ['video_id' => $videoId]);
+            } else {
+                $this->logDebug("Video encoding not fully complete yet", ['video_id' => $videoId]);
             }
 
         } catch (Exception $e) {

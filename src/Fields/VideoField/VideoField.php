@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace CmsOrbit\VideoField\Fields\VideoField;
 
+use CmsOrbit\VideoField\Entities\Video\Video;
+use Illuminate\Support\Arr;
 use Orchid\Screen\Field;
 use Orchid\Screen\Repository;
 
@@ -25,11 +27,10 @@ class VideoField extends Field
         'ajaxUrl' => '',
         'recentUrl' => '',
         'group' => 'video',
-        'count' => 1,
-        'size' => 500,
+        'size' => 0, // Will be set in constructor from config
         'uploadUrl' => '/settings/systems/files',
         'sortUrl' => '/settings/systems/files/sort',
-        'errorSize' => 'File ":name" is too large to upload (max 500MB)',
+        'errorSize' => 'File ":name" is too large to upload (max :sizeMB)',
         'errorType' => 'The attached file must be a video'
     ];
 
@@ -48,7 +49,6 @@ class VideoField extends Field
         'group',
         'storage',
         'path',
-        'count',
         'size',
         'uploadUrl',
         'sortUrl',
@@ -60,6 +60,10 @@ class VideoField extends Field
     {
         $this->attributes['storage'] = config('orbit-video.storage.disk');
         $this->attributes['path'] = sprintf('orbit-video-original/%s', date('Y/m/d'));
+        $this->attributes['size'] = (int) ceil(config('orbit-video.upload.max_file_size') / 1024 / 1024); // Convert bytes to MB
+
+        // Load attachment relations if applicable
+        $this->addBeforeRender(fn () => $this->setValue());
     }
 
     /**
@@ -68,7 +72,6 @@ class VideoField extends Field
     public function withoutUpload(): self
     {
         $this->attributes['withoutUpload'] = true;
-
         return $this;
     }
 
@@ -78,7 +81,6 @@ class VideoField extends Field
     public function withoutExists(): self
     {
         $this->attributes['withoutExists'] = true;
-
         return $this;
     }
 
@@ -88,7 +90,6 @@ class VideoField extends Field
     public function placeholder(string $placeholder): self
     {
         $this->attributes['placeholder'] = $placeholder;
-
         return $this;
     }
 
@@ -98,7 +99,6 @@ class VideoField extends Field
     public function maxResults(int $maxResults): self
     {
         $this->attributes['maxResults'] = $maxResults;
-
         return $this;
     }
 
@@ -108,7 +108,6 @@ class VideoField extends Field
     public function ajaxUrl(string $url): self
     {
         $this->attributes['ajaxUrl'] = $url;
-
         return $this;
     }
 
@@ -118,7 +117,6 @@ class VideoField extends Field
     public function recentUrl(string $url): self
     {
         $this->attributes['recentUrl'] = $url;
-
         return $this;
     }
 
@@ -128,7 +126,6 @@ class VideoField extends Field
     public function group(string $group): self
     {
         $this->attributes['group'] = $group;
-
         return $this;
     }
 
@@ -138,7 +135,6 @@ class VideoField extends Field
     public function storage(string $storage): self
     {
         $this->attributes['storage'] = $storage;
-
         return $this;
     }
 
@@ -148,17 +144,6 @@ class VideoField extends Field
     public function path(string $path): self
     {
         $this->attributes['path'] = $path;
-
-        return $this;
-    }
-
-    /**
-     * Set maximum file count.
-     */
-    public function count(int $count): self
-    {
-        $this->attributes['count'] = $count;
-
         return $this;
     }
 
@@ -168,7 +153,6 @@ class VideoField extends Field
     public function size(int $size): self
     {
         $this->attributes['size'] = $size;
-
         return $this;
     }
 
@@ -178,7 +162,6 @@ class VideoField extends Field
     public function uploadUrl(string $url): self
     {
         $this->attributes['uploadUrl'] = $url;
-
         return $this;
     }
 
@@ -188,7 +171,6 @@ class VideoField extends Field
     public function sortUrl(string $url): self
     {
         $this->attributes['sortUrl'] = $url;
-
         return $this;
     }
 
@@ -198,7 +180,6 @@ class VideoField extends Field
     public function errorSize(string $message): self
     {
         $this->attributes['errorSize'] = $message;
-
         return $this;
     }
 
@@ -208,7 +189,6 @@ class VideoField extends Field
     public function errorType(string $message): self
     {
         $this->attributes['errorType'] = $message;
-
         return $this;
     }
 
@@ -218,43 +198,35 @@ class VideoField extends Field
      */
     public function modify(Repository $repository, string $key, $value)
     {
-        // 비디오 데이터를 처리하는 로직은 HasVideos 트레이트에서 처리
-        // 여기서는 단순히 값만 반환
-        return $value;
+        return null;
     }
 
     /**
      * Get the field's value for display.
      */
-    public function getValue(Repository $repository, string $key)
+    public function setValue(): void
     {
-        $model = $repository->get('document');
+        $videoData = $this->get('value');
+        $videoId = Arr::get($videoData, 'id');
+        if (!is_array($videoData) || !$videoId) return;
 
-        if (!$model || !method_exists($model, 'getVideo')) {
-            return null;
-        }
+        $videoModel = Video::query()->find($videoId);
+        if (!$videoModel) return;
 
-        $video = $model->getVideo($key);
-        if ($video && !$video->relationLoaded('originalFile')) {
-            $video->load('originalFile');
-        }
+        $bestSize = (int) Arr::get($videoData, 'profiles.best.file_size', 0);
 
-        if (!$video) {
-            return null;
-        }
-
-        return [
+        $this->set('value', json_encode([
             'type' => 'existing',
-            'video_id' => $video->getAttribute('id'),
+            'video_id' => $videoId,
             'video' => [
-                'id' => $video->getAttribute('id'),
-                'title' => $video->getAttribute('title'),
-                'filename' => $video->originalFile?->getAttribute('original_name') ?? $video->getAttribute('title'),
-                'duration' => $video->getAttribute('duration'),
-                'file_size' => $video->originalFile?->getAttribute('size') ?? 0,
-                'status' => $video->getAttribute('status'),
-                'thumbnail_url' => $video->getThumbnailUrl(),
+                'id' => $videoId,
+                'title' => $videoData['title'] ?? null,
+                'filename' => $videoModel->originalFile?->getAttribute('original_name'),
+                'duration' => $videoData['duration'] ?? null,
+                'file_size' => $bestSize,
+                'status' => $videoData['status'] ?? null,
+                'thumbnail_url' => $videoModel->getThumbnailUrl(),
             ]
-        ];
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     }
 }

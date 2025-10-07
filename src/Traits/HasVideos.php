@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace CmsOrbit\VideoField\Traits;
 
 use CmsOrbit\VideoField\Entities\Video\Video;
+use CmsOrbit\VideoField\Entities\Video\VideoFieldRelation;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Arr;
 
 trait HasVideos
 {
@@ -15,6 +17,8 @@ trait HasVideos
      */
     protected static function bootHasVideos(): void
     {
+        static $videoColumns = [];
+
         static::addGlobalScope('withVideoFields', function (Builder $builder) {
             $builder->with(['videos.profiles']);
         });
@@ -23,25 +27,37 @@ trait HasVideos
             $model->mapVideoFieldsToAttributes();
         });
 
-        static::saved(function (self $model) {
-            foreach ($model->getVideoFields() as $fieldName) {
-                $videoData = request()->input($fieldName);
+        static::saving(function (self $model) use (&$videoColumns){
+            $videoFields = $model->getVideoFields();
+            foreach ($videoFields as $field) {
+                $videoColumns[$field] = $model->{$field};
+                unset($model->attributes[$field]);
+            }
+        });
+
+        static::saved(function (self $model) use (&$videoColumns) {
+            $model->videos()->detach();
+            foreach ($videoColumns as $fieldName => $videoData) {
+                $videoId = null;
                 if ($videoData) {
-                    $videoData = json_decode($videoData, true);
-                    if (isset($videoData['video_id'])) {
-                        $video = Video::query()->find($videoData['video_id']);
-                        if ($video) {
-                            $model->videos()->sync([
-                                $video->getKey() => [
-                                    'field_name' => $fieldName,
-                                    'model_type' => static::class,
-                                    'model_id' => $model->getKey()
-                                ]
-                            ]);
-                        }
-                    }
+                    $data = json_decode($videoData, true);
+                    $videoId = $data['video_id'] ?? null;
+                }
+
+                if ($videoId) {
+                    VideoFieldRelation::query()->updateOrCreate(
+                        [
+                            'field_name' => $fieldName,
+                            'model_type' => static::class,
+                            'model_id' => $model->getKey()
+                        ],
+                        [
+                            'video_id' => $videoId,
+                        ]
+                    );
                 }
             }
+            $videoColumns = [];
         });
     }
 

@@ -31,12 +31,14 @@ class VideoSpriteJob implements ShouldQueue
     /**
      * Create a new job instance.
      */
-    public function __construct(Video $video, int $frames = 100, int $columns = 10, int $rows = 10, bool $force = false)
+    public function __construct(Video $video, ?int $frames = null, ?int $columns = null, ?int $rows = null, bool $force = false)
     {
+        $spriteConfig = config('orbit-video.sprites', []);
+
         $this->video = $video;
-        $this->frames = $frames;
-        $this->columns = $columns;
-        $this->rows = $rows;
+        $this->frames = $frames ?? 100;
+        $this->columns = $columns ?? ($spriteConfig['columns'] ?? 10);
+        $this->rows = $rows ?? ($spriteConfig['rows'] ?? 10);
         $this->force = $force;
     }
 
@@ -89,38 +91,59 @@ class VideoSpriteJob implements ShouldQueue
     private function generateSprite(): bool
     {
         try {
+            $videoId = $this->video->getAttribute('id');
+
             // Check if sprite already exists
             if ($this->video->getAttribute('scrubbing_sprite_path') && !$this->force) {
                 $disk = config('orbit-video.storage.disk');
-                if (Storage::disk($disk)->exists($this->video->getAttribute('scrubbing_sprite_path'))) {
-                    Log::info("Sprite already exists for video: {$this->video->getAttribute('id')}");
+                $existingPath = $this->video->getAttribute('scrubbing_sprite_path');
+                if (Storage::disk($disk)->exists($existingPath)) {
+                    $this->logInfo("Sprite already exists, skipping", [
+                        'video_id' => $videoId,
+                        'sprite_path' => $existingPath,
+                    ]);
                     return true;
                 }
             }
 
             // Check if FFmpeg is available
+            $this->logDebug("Checking FFmpeg availability for sprite generation", ['video_id' => $videoId]);
             if (!$this->checkFFmpeg()) {
-                $this->logJobError('sprite generation', $this->video->getAttribute('id'), 'FFmpeg not found');
+                $this->logJobError('sprite generation', $videoId, 'FFmpeg not found - please install FFmpeg');
                 return false;
             }
 
             // Find original file
             try {
+                $this->logDebug("Getting video path for sprite", ['video_id' => $videoId]);
                 $originalPath = $this->video->getVideoPath();
             } catch (Exception $e) {
-                $this->logJobError('sprite generation', $this->video->getAttribute('id'), 'Failed to get video path: ' . $e->getMessage());
+                $this->logJobError('sprite generation', $videoId, 'Failed to get video path: ' . $e->getMessage(), [
+                    'exception' => get_class($e),
+                    'trace' => $e->getTraceAsString(),
+                ]);
                 return false;
             }
 
             if (!$originalPath || !file_exists($originalPath)) {
-                $this->logJobError('sprite generation', $this->video->getAttribute('id'), 'Original video file not found at: ' . $originalPath);
+                $this->logJobError('sprite generation', $videoId, 'Original video file not found', [
+                    'expected_path' => $originalPath,
+                    'file_exists' => file_exists($originalPath ?? ''),
+                ]);
                 return false;
             }
+
+            $this->logInfo("Original video file found for sprite", [
+                'video_id' => $videoId,
+                'path' => $originalPath,
+            ]);
 
             // Check video duration
             $duration = $this->video->getAttribute('duration');
             if (!$duration || $duration <= 0) {
-                $this->logJobError('sprite generation', $this->video->getAttribute('id'), 'Video duration not available');
+                $this->logJobError('sprite generation', $videoId, 'Video duration not available or invalid', [
+                    'duration' => $duration,
+                ]);
                 return false;
             }
 
@@ -128,15 +151,27 @@ class VideoSpriteJob implements ShouldQueue
             $totalFrames = min($this->frames, $this->columns * $this->rows);
             $interval = $duration / ($totalFrames + 1); // +1 to avoid capturing at exact end
 
-            Log::info("Sprite parameters - Duration: {$duration}s, Frames: {$totalFrames}, Interval: " . round($interval, 2) . "s");
+            $this->logInfo("Sprite parameters calculated", [
+                'video_id' => $videoId,
+                'duration' => $duration . 's',
+                'total_frames' => $totalFrames,
+                'interval' => round($interval, 2) . 's',
+                'grid' => "{$this->columns}x{$this->rows}",
+            ]);
 
             // Generate sprite
+            $this->logDebug("Generating sprite sheet", [
+                'video_id' => $videoId,
+                'total_frames' => $totalFrames,
+            ]);
+
             $spritePath = $this->generateSpriteSheet($originalPath, $totalFrames, $interval);
 
             if ($spritePath) {
                 // Generate sprite metadata
+                $this->logDebug("Generating sprite metadata", ['video_id' => $videoId]);
                 $spriteMetadata = $this->generateSpriteMetadata($spritePath, $totalFrames, $interval);
-                
+
                 // Save metadata to JSON file
                 $metadataPath = $this->saveSpriteMetadata($spriteMetadata);
 
@@ -145,41 +180,24 @@ class VideoSpriteJob implements ShouldQueue
                     'scrubbing_sprite_path' => $metadataPath,
                 ]);
 
-                Log::info("Sprite saved to: {$spritePath}");
-                Log::info("Sprite metadata saved to: {$metadataPath}");
+                $this->logInfo("Sprite generated and saved successfully", [
+                    'video_id' => $videoId,
+                    'sprite_path' => $spritePath,
+                    'metadata_path' => $metadataPath,
+                ]);
                 return true;
             } else {
-                Log::error("Failed to generate sprite sheet");
+                $this->logJobError('sprite generation', $videoId, 'Failed to generate sprite sheet');
                 return false;
             }
 
         } catch (Exception $e) {
-            Log::error("Exception in sprite generation: " . $e->getMessage());
+            $this->logJobError('sprite generation', $this->video->getAttribute('id'), "Exception: " . $e->getMessage(), [
+                'exception' => get_class($e),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return false;
         }
-    }
-
-
-    /**
-     * Find the original video file.
-     */
-    private function findOriginalFile(): ?string
-    {
-        $disk = config('orbit-video.storage.disk');
-        $videoPath = $this->video->getVideoPath();
-
-        $patterns = [
-            $videoPath . '/original_' . $this->video->getAttribute('original_filename'),
-            $videoPath . '/' . $this->video->getAttribute('original_filename'),
-        ];
-
-        foreach ($patterns as $pattern) {
-            if (Storage::disk($disk)->exists($pattern)) {
-                return Storage::disk($disk)->path($pattern);
-            }
-        }
-
-        return null;
     }
 
     /**
@@ -209,24 +227,43 @@ class VideoSpriteJob implements ShouldQueue
             $this->ensureDirectoryExists($spriteDirectory);
 
             // Method 1: Try FFmpeg tile filter (faster)
+            $this->logDebug("Attempting sprite generation with tile filter", [
+                'video_id' => $this->video->getAttribute('id'),
+            ]);
+
             if ($this->generateSpriteWithTileFilter($originalPath, $fullSpritePath, $totalFrames, $interval, $frameWidth, $frameHeight, $quality, $format)) {
                 $fileSize = filesize($fullSpritePath);
-                Log::info("Sprite generated using tile filter ({$this->formatFileSize($fileSize)})");
+                $this->logInfo("Sprite generated using tile filter", [
+                    'video_id' => $this->video->getAttribute('id'),
+                    'file_size' => $this->formatFileSize($fileSize),
+                    'method' => 'tile_filter',
+                ]);
                 return $spritePath;
             }
 
             // Method 2: Fallback to frame extraction and composition
-            Log::info("Tile filter failed, trying frame extraction method...");
+            $this->logWarning("Tile filter failed, trying frame extraction method", [
+                'video_id' => $this->video->getAttribute('id'),
+            ]);
+
             if ($this->generateSpriteWithFrameExtraction($originalPath, $fullSpritePath, $totalFrames, $interval, $frameWidth, $frameHeight, $quality, $format)) {
                 $fileSize = filesize($fullSpritePath);
-                Log::info("Sprite generated using frame extraction ({$this->formatFileSize($fileSize)})");
+                $this->logInfo("Sprite generated using frame extraction", [
+                    'video_id' => $this->video->getAttribute('id'),
+                    'file_size' => $this->formatFileSize($fileSize),
+                    'method' => 'frame_extraction',
+                ]);
                 return $spritePath;
             }
 
+            $this->logJobError('sprite generation', $this->video->getAttribute('id'), 'Both sprite generation methods failed');
             return null;
 
         } catch (Exception $e) {
-            Log::error("Exception generating sprite: " . $e->getMessage());
+            $this->logJobError('sprite generation', $this->video->getAttribute('id'), "Exception: " . $e->getMessage(), [
+                'exception' => get_class($e),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return null;
         }
     }
@@ -261,7 +298,10 @@ class VideoSpriteJob implements ShouldQueue
             $command[] = '-y';
             $command[] = $outputPath;
 
-            Log::info("Executing tile filter command: " . implode(' ', $command));
+            $this->logFFmpegCommand($command, [
+                'video_id' => $this->video->getAttribute('id'),
+                'method' => 'tile_filter',
+            ]);
 
             // Execute FFmpeg
             $process = new Process($command);
@@ -269,14 +309,24 @@ class VideoSpriteJob implements ShouldQueue
             $process->run();
 
             if ($process->isSuccessful() && file_exists($outputPath)) {
+                $this->logFFmpegResult(true, $process->getOutput(), '', [
+                    'video_id' => $this->video->getAttribute('id'),
+                    'method' => 'tile_filter',
+                ]);
                 return true;
             } else {
-                Log::info("Tile filter error: " . $process->getErrorOutput());
+                $this->logFFmpegResult(false, $process->getOutput(), $process->getErrorOutput(), [
+                    'video_id' => $this->video->getAttribute('id'),
+                    'method' => 'tile_filter',
+                ]);
                 return false;
             }
 
         } catch (Exception $e) {
-            Log::info("Tile filter exception: " . $e->getMessage());
+            $this->logDebug("Tile filter exception: " . $e->getMessage(), [
+                'video_id' => $this->video->getAttribute('id'),
+                'exception' => get_class($e),
+            ]);
             return false;
         }
     }
@@ -449,7 +499,7 @@ class VideoSpriteJob implements ShouldQueue
             $time = ($i + 1) * $interval;
             $col = $i % $this->columns;
             $row = floor($i / $this->columns);
-            
+
             $frames[] = [
                 'index' => $i,
                 'time' => round($time, 3),
@@ -503,17 +553,17 @@ class VideoSpriteJob implements ShouldQueue
         $basePath = config('orbit-video.storage.sprites_path', 'videos/{videoId}/sprites');
         $spritesPath = str_replace('{videoId}', (string) $videoId, $basePath);
         $metadataPath = "{$spritesPath}/sprite_metadata.json";
-        
+
         $disk = config('orbit-video.storage.disk');
         $fullMetadataPath = Storage::disk($disk)->path($metadataPath);
-        
+
         // Ensure directory exists
         $metadataDir = dirname($fullMetadataPath);
         $this->ensureDirectoryExists($metadataDir);
-        
+
         // Save JSON file
         file_put_contents($fullMetadataPath, json_encode($metadata, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-        
+
         return $metadataPath;
     }
 

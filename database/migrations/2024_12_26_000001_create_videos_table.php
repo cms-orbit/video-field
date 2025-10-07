@@ -30,7 +30,6 @@ return new class extends Migration
             $table->integer('original_bitrate')->nullable(); // 원본 비트레이트
             $table->string('thumbnail_path')->nullable();
             $table->string('scrubbing_sprite_path')->nullable();
-            $table->json('meta_data')->nullable(); // 추가 메타데이터
 
             $table->string('hls_manifest_path')->nullable();
             $table->string('dash_manifest_path')->nullable();

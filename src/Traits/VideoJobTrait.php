@@ -135,11 +135,34 @@ trait VideoJobTrait
     }
 
     /**
+     * Get the configured log channel.
+     */
+    protected function getLogChannel(): ?string
+    {
+        return config('orbit-video.channels.log');
+    }
+
+    /**
+     * Write log message to configured channel.
+     */
+    protected function writeLog(string $level, string $message, array $context = []): void
+    {
+        $channel = $this->getLogChannel();
+        if ($channel) {
+            Log::channel($channel)->$level($message, $context);
+        }
+    }
+
+    /**
      * Log job start with context.
      */
     protected function logJobStart(string $jobName, int $videoId, array $context = []): void
     {
-        Log::info("Starting {$jobName} for video: {$videoId}", $context);
+        $this->writeLog('info', "Starting {$jobName} for video: {$videoId}", array_merge($context, [
+            'video_id' => $videoId,
+            'job_name' => $jobName,
+            'timestamp' => now()->toDateTimeString(),
+        ]));
     }
 
     /**
@@ -147,7 +170,11 @@ trait VideoJobTrait
      */
     protected function logJobCompletion(string $jobName, int $videoId, array $context = []): void
     {
-        Log::info("Completed {$jobName} for video: {$videoId}", $context);
+        $this->writeLog('info', "Completed {$jobName} for video: {$videoId}", array_merge($context, [
+            'video_id' => $videoId,
+            'job_name' => $jobName,
+            'timestamp' => now()->toDateTimeString(),
+        ]));
     }
 
     /**
@@ -155,6 +182,65 @@ trait VideoJobTrait
      */
     protected function logJobError(string $jobName, int $videoId, string $error, array $context = []): void
     {
-        Log::error("Error in {$jobName} for video: {$videoId} - {$error}", $context);
+        $this->writeLog('error', "Error in {$jobName} for video: {$videoId} - {$error}", array_merge($context, [
+            'video_id' => $videoId,
+            'job_name' => $jobName,
+            'error' => $error,
+            'timestamp' => now()->toDateTimeString(),
+        ]));
+    }
+
+    /**
+     * Log general info message.
+     */
+    protected function logInfo(string $message, array $context = []): void
+    {
+        $this->writeLog('info', $message, $context);
+    }
+
+    /**
+     * Log warning message.
+     */
+    protected function logWarning(string $message, array $context = []): void
+    {
+        $this->writeLog('warning', $message, $context);
+    }
+
+    /**
+     * Log debug message.
+     */
+    protected function logDebug(string $message, array $context = []): void
+    {
+        $this->writeLog('debug', $message, $context);
+    }
+
+    /**
+     * Log FFmpeg command execution.
+     */
+    protected function logFFmpegCommand(array $command, array $context = []): void
+    {
+        $this->writeLog('debug', 'Executing FFmpeg command', array_merge($context, [
+            'command' => implode(' ', $command),
+            'timestamp' => now()->toDateTimeString(),
+        ]));
+    }
+
+    /**
+     * Log FFmpeg execution result.
+     */
+    protected function logFFmpegResult(bool $success, string $output = '', string $errorOutput = '', array $context = []): void
+    {
+        if ($success) {
+            $this->writeLog('info', 'FFmpeg command executed successfully', array_merge($context, [
+                'output' => $output,
+                'timestamp' => now()->toDateTimeString(),
+            ]));
+        } else {
+            $this->writeLog('error', 'FFmpeg command failed', array_merge($context, [
+                'error_output' => $errorOutput,
+                'output' => $output,
+                'timestamp' => now()->toDateTimeString(),
+            ]));
+        }
     }
 }

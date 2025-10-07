@@ -84,29 +84,55 @@ class VideoProcessJob implements ShouldQueue
      */
     private function processVideoSequentially(): void
     {
-        $queueName = config('orbit-video.queue.queue_name', 'encode_video');
+        $videoId = $this->video->getAttribute('id');
+        $queueName = config('orbit-video.channels.queue', 'encode_video');
+
+        $this->logInfo("Setting up video processing job chain", [
+            'video_id' => $videoId,
+            'queue' => $queueName,
+            'force' => $this->force,
+            'has_model_profiles' => !empty($this->modelProfiles),
+        ]);
 
         // Create jobs
-        $encodeJob = (new VideoEncodeJob($this->video, $this->modelProfiles, $this->force))
+        $jobs = [];
+        $jobNames = [];
+        
+        $jobs[] = (new VideoEncodeJob($this->video, $this->modelProfiles, $this->force))
             ->onQueue($queueName);
+        $jobNames[] = 'encode';
 
-        $thumbnailJob = (new VideoThumbnailJob($this->video, 5, $this->force))
+        $jobs[] = (new VideoThumbnailJob($this->video, null, $this->force))
             ->onQueue($queueName);
+        $jobNames[] = 'thumbnail';
 
-        $spriteJob = (new VideoSpriteJob($this->video, 100, 10, 10, $this->force))
-            ->onQueue($queueName);
+        // Add sprite job only if enabled in config
+        $spriteEnabled = config('orbit-video.sprites.enabled', true);
+        if ($spriteEnabled) {
+            $jobs[] = (new VideoSpriteJob($this->video, null, null, null, $this->force))
+                ->onQueue($queueName);
+            $jobNames[] = 'sprite';
+        } else {
+            $this->logDebug("Sprite generation disabled in config", ['video_id' => $videoId]);
+        }
 
-        $manifestJob = (new VideoManifestJob($this->video))
+        $jobs[] = (new VideoManifestJob($this->video))
             ->onQueue($queueName);
+        $jobNames[] = 'manifest';
+
+        $this->logInfo("Job chain prepared", [
+            'video_id' => $videoId,
+            'total_jobs' => count($jobs),
+            'jobs' => $jobNames,
+        ]);
 
         // Chain jobs using Bus::chain()
-        \Illuminate\Support\Facades\Bus::chain([
-            $encodeJob,
-            $thumbnailJob,
-            $spriteJob,
-            $manifestJob
-        ])->onQueue($queueName)->dispatch();
+        \Illuminate\Support\Facades\Bus::chain($jobs)->onQueue($queueName)->dispatch();
 
-        Log::info("Job chain dispatched for video: {$this->video->getAttribute('id')}");
+        $this->logInfo("Job chain dispatched successfully", [
+            'video_id' => $videoId,
+            'queue' => $queueName,
+            'jobs' => $jobNames,
+        ]);
     }
 }

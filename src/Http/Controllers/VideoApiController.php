@@ -89,8 +89,11 @@ class VideoApiController extends Controller
      */
     public function upload(Request $request): JsonResponse
     {
+        $maxFileSizeKB = (int) ceil(config('orbit-video.upload.max_file_size') / 1024);
+        $allowedMimes = implode(',', config('orbit-video.upload.allowed_extensions'));
+        
         $request->validate([
-            'video' => 'required|file|mimes:mp4,avi,mov,wmv,flv,webm|max:10240', // 10GB max
+            'video' => "required|file|mimes:{$allowedMimes}|max:{$maxFileSizeKB}",
         ]);
 
         try {

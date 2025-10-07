@@ -13,6 +13,7 @@ class VideoFieldRelation extends MorphPivot
     protected $table = 'video_field_relations';
     protected $guarded = [];
 
+    public $timestamps = false;
     /**
      * Get the video that owns this relation.
      */

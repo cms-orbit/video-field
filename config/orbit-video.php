@@ -3,7 +3,23 @@
 use CmsOrbit\VideoField\Entities\Video\VideoFieldRelation;
 
 return [
+    /*
+    |--------------------------------------------------------------------------
+    | Model Configuration
+    |--------------------------------------------------------------------------
+    */
     'video_field_relation_model' => VideoFieldRelation::class,
+
+    /*
+    |--------------------------------------------------------------------------
+    | Channel Configuration
+    |--------------------------------------------------------------------------
+    */
+    'channels' => [
+        'queue' => env('VIDEO_QUEUE_NAME', 'default'),
+        'log' => env('VIDEO_LOG_CHANNEL', null),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Video Storage Configuration
@@ -48,7 +64,6 @@ return [
             'video/x-flv',
             'video/x-m4v',
         ],
-        'chunk_size' => env('VIDEO_CHUNK_SIZE', 1048576), // 1MB
     ],
 
     /*
@@ -132,7 +147,7 @@ return [
     'thumbnails' => [
         'quality' => 100,
         'format' => 'jpeg',
-        'time_position' => '00:00:05', // 5 seconds into video
+        'time_position' => 5, // seconds into video
     ],
 
     /*
@@ -149,28 +164,5 @@ return [
         'interval' => 10, // seconds between frames
         'quality' => 70,
         'format' => 'jpeg',
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
-    | Queue Configuration
-    |--------------------------------------------------------------------------
-    */
-    'queue' => [
-        'connection' => env('QUEUE_CONNECTION', 'redis'),
-        'queue_name' => env('VIDEO_QUEUE_NAME', 'default'),
-        'max_tries' => env('VIDEO_MAX_TRIES', 3),
-        'retry_delay' => env('VIDEO_RETRY_DELAY', 300), // 5 minutes
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
-    | Cleanup Configuration
-    |--------------------------------------------------------------------------
-    */
-    'cleanup' => [
-        'auto_cleanup' => env('VIDEO_AUTO_CLEANUP', true),
-        'temp_file_ttl' => env('VIDEO_TEMP_FILE_TTL', 86400), // 24 hours
-        'failed_job_ttl' => env('VIDEO_FAILED_JOB_TTL', 604800), // 1 week
     ],
 ];

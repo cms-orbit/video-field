@@ -155,16 +155,6 @@
                 </div>
             </div>
         </div>
-
-        <!-- Metadata Information -->
-        @if($video->getAttribute('meta_data'))
-            <div class="mt-6 pt-4 border-t border-gray-200">
-                <h4 class="font-medium text-gray-700 mb-2">{{ __('Metadata') }}</h4>
-                <div class="bg-gray-50 rounded-md p-3">
-                    <pre class="text-xs text-gray-600 overflow-x-auto"><code>{{ json_encode($video->getAttribute('meta_data'), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</code></pre>
-                </div>
-            </div>
-        @endif
         </div>
 
         <!-- Progress Bar -->

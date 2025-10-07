@@ -6,7 +6,6 @@ namespace CmsOrbit\VideoField\Jobs;
 
 use CmsOrbit\VideoField\Entities\Video\Video;
 use CmsOrbit\VideoField\Entities\Video\VideoProfile;
-use CmsOrbit\VideoField\Entities\Video\VideoEncodingLog;
 use CmsOrbit\VideoField\Traits\VideoJobTrait;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -61,7 +60,10 @@ class VideoEncodeJob implements ShouldQueue
             if ($model && method_exists($model, 'getAvailableVideoProfiles')) {
                 $modelProfiles = $model->getAvailableVideoProfiles();
                 if (!empty($modelProfiles)) {
-                    Log::info("Using profiles from related model: " . get_class($model));
+                    $this->logInfo("Using profiles from related model: " . get_class($model), [
+                        'model_class' => get_class($model),
+                        'profiles' => array_keys($modelProfiles),
+                    ]);
                     return $modelProfiles;
                 }
             }
@@ -69,13 +71,18 @@ class VideoEncodeJob implements ShouldQueue
 
         // Fall back to modelProfiles parameter if provided
         if ($this->modelProfiles) {
-            Log::info("Using profiles from modelProfiles parameter");
+            $this->logInfo("Using profiles from modelProfiles parameter", [
+                'profiles' => $this->modelProfiles,
+            ]);
             return $this->modelProfiles;
         }
 
         // Finally, use config default
-        Log::info("Using default profiles from config");
-        return config('orbit-video.default_profiles', []);
+        $defaultProfiles = config('orbit-video.default_profiles', []);
+        $this->logInfo("Using default profiles from config", [
+            'profiles' => array_keys($defaultProfiles),
+        ]);
+        return $defaultProfiles;
     }
 
     /**
@@ -93,15 +100,21 @@ class VideoEncodeJob implements ShouldQueue
             if ($model && method_exists($model, 'getVideoEncodingSettings')) {
                 $modelConfig = $model->getVideoEncodingSettings();
                 if (!empty($modelConfig)) {
-                    Log::info("Using encoding config from related model: " . get_class($model));
+                    $this->logInfo("Using encoding config from related model: " . get_class($model), [
+                        'model_class' => get_class($model),
+                        'config' => $modelConfig,
+                    ]);
                     return $modelConfig;
                 }
             }
         }
 
         // Fall back to config default
-        Log::info("Using default encoding config from config");
-        return config('orbit-video.default_encoding', []);
+        $defaultConfig = config('orbit-video.default_encoding', []);
+        $this->logInfo("Using default encoding config from config", [
+            'config' => $defaultConfig,
+        ]);
+        return $defaultConfig;
     }
 
     /**
@@ -153,31 +166,57 @@ class VideoEncodeJob implements ShouldQueue
      */
     private function encodeVideo(): bool
     {
+        $videoId = $this->video->getAttribute('id');
+
         // Check if FFmpeg is available
+        $this->logDebug("Checking FFmpeg availability", ['video_id' => $videoId]);
         if (!$this->checkFFmpeg()) {
-            $this->logJobError('video encoding', $this->video->getAttribute('id'), 'FFmpeg not found');
+            $this->logJobError('video encoding', $videoId, 'FFmpeg not found - please install FFmpeg');
             return false;
         }
+        $this->logDebug("FFmpeg is available", ['video_id' => $videoId]);
 
         // Find original file
         try {
+            $this->logDebug("Getting video path", ['video_id' => $videoId]);
             $originalPath = $this->video->getVideoPath();
         } catch (Exception $e) {
-            $this->logJobError('video encoding', $this->video->getAttribute('id'), 'Failed to get video path: ' . $e->getMessage());
+            $this->logJobError('video encoding', $videoId, 'Failed to get video path: ' . $e->getMessage(), [
+                'exception' => get_class($e),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return false;
         }
 
         if (!$originalPath || !file_exists($originalPath)) {
-            $this->logJobError('video encoding', $this->video->getAttribute('id'), 'Original video file not found at: ' . $originalPath);
+            $this->logJobError('video encoding', $videoId, 'Original video file not found', [
+                'expected_path' => $originalPath,
+                'file_exists' => file_exists($originalPath ?? ''),
+            ]);
             return false;
         }
 
+        $this->logInfo("Original video file found", [
+            'video_id' => $videoId,
+            'path' => $originalPath,
+            'file_size' => $this->formatFileSize(filesize($originalPath)),
+        ]);
+
         // Get video metadata
+        $this->logDebug("Extracting video metadata", ['video_id' => $videoId]);
         $metadata = $this->getVideoMetadata($originalPath);
         if (!$metadata) {
-            $this->logJobError('video encoding', $this->video->getAttribute('id'), 'Failed to extract video metadata');
+            $this->logJobError('video encoding', $videoId, 'Failed to extract video metadata - file may be corrupted');
             return false;
         }
+
+        $this->logInfo("Video metadata extracted successfully", [
+            'video_id' => $videoId,
+            'duration' => $metadata['duration'] . 's',
+            'resolution' => $metadata['width'] . 'x' . $metadata['height'],
+            'framerate' => $metadata['framerate'] . 'fps',
+            'bitrate' => $this->formatFileSize($metadata['bitrate']) . '/s',
+        ]);
 
         // Update video with metadata
         $this->video->update([
@@ -190,25 +229,60 @@ class VideoEncodeJob implements ShouldQueue
 
         // Get profiles to encode - use model profiles if available, otherwise use config
         $allProfiles = $this->getProfilesForVideo();
+        $this->logDebug("Selecting suitable profiles for encoding", [
+            'video_id' => $videoId,
+            'total_available_profiles' => count($allProfiles),
+        ]);
+
         $suitableProfiles = $this->selectSuitableProfiles($metadata, $allProfiles);
 
         if (empty($suitableProfiles)) {
-            Log::warning('No suitable profiles found for encoding for video: ' . $this->video->getAttribute('id'));
+            $this->logWarning('No suitable profiles found for encoding', [
+                'video_id' => $videoId,
+                'video_resolution' => $metadata['width'] . 'x' . $metadata['height'],
+                'available_profiles' => array_keys($allProfiles),
+            ]);
             return true; // Not an error, just no encoding needed
         }
 
+        $this->logInfo("Starting encoding for " . count($suitableProfiles) . " profile(s)", [
+            'video_id' => $videoId,
+            'profiles' => array_keys($suitableProfiles),
+        ]);
+
         $successCount = 0;
+        $failedProfiles = [];
+
         foreach ($suitableProfiles as $profileName => $profileConfig) {
+            $this->logInfo("Starting profile encoding: {$profileName}", [
+                'video_id' => $videoId,
+                'profile' => $profileName,
+                'target_resolution' => $profileConfig['width'] . 'x' . $profileConfig['height'],
+                'target_bitrate' => $profileConfig['bitrate'],
+            ]);
+
             if ($this->encodeProfile($profileName, $profileConfig, $originalPath, $metadata)) {
                 $successCount++;
+            } else {
+                $failedProfiles[] = $profileName;
             }
         }
 
         $totalProfiles = count($suitableProfiles);
-        $this->logJobCompletion('video encoding', $this->video->getAttribute('id'), [
-            'successful_profiles' => $successCount,
-            'total_profiles' => $totalProfiles
-        ]);
+
+        if ($successCount > 0) {
+            $this->logJobCompletion('video encoding', $videoId, [
+                'successful_profiles' => $successCount,
+                'failed_profiles' => count($failedProfiles),
+                'total_profiles' => $totalProfiles,
+                'failed_profile_names' => $failedProfiles,
+            ]);
+        } else {
+            $this->logJobError('video encoding', $videoId, 'All profiles failed to encode', [
+                'total_profiles' => $totalProfiles,
+                'failed_profile_names' => $failedProfiles,
+            ]);
+        }
 
         return $successCount > 0; // Success if at least one profile was encoded
     }
@@ -227,10 +301,18 @@ class VideoEncodeJob implements ShouldQueue
             if ($existingProfile && !$this->force) {
                 $disk = config('orbit-video.storage.disk');
                 if (Storage::disk($disk)->exists($existingProfile->generateProfilePath())) {
-                    Log::info("Profile {$profileName} already exists, skipping");
+                    $this->logInfo("Profile {$profileName} already exists, skipping", [
+                        'profile' => $profileName,
+                        'video_id' => $this->video->getAttribute('id'),
+                    ]);
                     return true;
                 }
             }
+
+            $this->logDebug("Creating or updating video profile record", [
+                'profile' => $profileName,
+                'video_id' => $this->video->getAttribute('id'),
+            ]);
 
             // Create or update video profile record
             /** @var VideoProfile $videoProfile */
@@ -257,18 +339,32 @@ class VideoEncodeJob implements ShouldQueue
             $hlsSuccess = false;
             $dashSuccess = false;
 
+            $exportFormats = [];
+            if ($videoProfile->shouldExportProgressive()) $exportFormats[] = 'progressive';
+            if ($videoProfile->shouldExportHls()) $exportFormats[] = 'hls';
+            if ($videoProfile->shouldExportDash()) $exportFormats[] = 'dash';
+
+            $this->logInfo("Encoding profile {$profileName} in formats: " . implode(', ', $exportFormats), [
+                'profile' => $profileName,
+                'formats' => $exportFormats,
+                'video_id' => $this->video->getAttribute('id'),
+            ]);
+
             // Encode progressive MP4 if enabled
             if ($videoProfile->shouldExportProgressive()) {
+                $this->logDebug("Starting progressive MP4 encoding for {$profileName}");
                 $progressiveSuccess = $this->encodeProgressiveProfile($videoProfile, $originalPath, $profileConfig, $encodingLog);
             }
 
             // Encode HLS if enabled
             if ($videoProfile->shouldExportHls()) {
+                $this->logDebug("Starting HLS encoding for {$profileName}");
                 $hlsSuccess = $this->encodeHlsProfile($videoProfile, $originalPath, $profileConfig, $encodingLog);
             }
 
             // Encode DASH if enabled
             if ($videoProfile->shouldExportDash()) {
+                $this->logDebug("Starting DASH encoding for {$profileName}");
                 $dashSuccess = $this->encodeDashProfile($videoProfile, $originalPath, $profileConfig, $encodingLog);
             }
 
@@ -289,16 +385,30 @@ class VideoEncodeJob implements ShouldQueue
                     'progress' => 100,
                 ]);
 
-                Log::info("Profile {$profileName} encoded successfully");
+                $successFormats = [];
+                if ($progressiveSuccess) $successFormats[] = 'progressive';
+                if ($hlsSuccess) $successFormats[] = 'hls';
+                if ($dashSuccess) $successFormats[] = 'dash';
+
+                $this->logInfo("Profile {$profileName} encoded successfully", [
+                    'profile' => $profileName,
+                    'video_id' => $this->video->getAttribute('id'),
+                    'encoded_formats' => $successFormats,
+                ]);
                 return true;
             } else {
                 $videoProfile->update(['status' => 'failed']);
                 $encodingLog->update([
                     'status' => 'error',
-                    'error_output' => 'Both HLS and DASH encoding failed',
+                    'error_output' => 'All format encoding failed',
                 ]);
 
-                Log::error("Profile {$profileName} encoding failed");
+                $this->logJobError('profile encoding', $this->video->getAttribute('id'), "Profile {$profileName} encoding failed", [
+                    'profile' => $profileName,
+                    'progressive_attempted' => $videoProfile->shouldExportProgressive(),
+                    'hls_attempted' => $videoProfile->shouldExportHls(),
+                    'dash_attempted' => $videoProfile->shouldExportDash(),
+                ]);
                 return false;
             }
 
@@ -313,7 +423,11 @@ class VideoEncodeJob implements ShouldQueue
                 ]);
             }
 
-            Log::error("Exception encoding profile {$profileName}: " . $e->getMessage());
+            $this->logJobError('profile encoding', $this->video->getAttribute('id'), "Exception encoding profile {$profileName}: " . $e->getMessage(), [
+                'profile' => $profileName,
+                'exception' => get_class($e),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return false;
         }
     }
@@ -402,7 +516,11 @@ class VideoEncodeJob implements ShouldQueue
             // Update log with actual command
             $encodingLog->update(['ffmpeg_command' => implode(' ', $command)]);
 
-            Log::info("Starting progressive MP4 encoding for profile: {$videoProfile->getAttribute('profile')}");
+            $this->logFFmpegCommand($command, [
+                'profile' => $videoProfile->getAttribute('profile'),
+                'format' => 'progressive MP4',
+                'video_id' => $this->video->getAttribute('id'),
+            ]);
 
             // Execute FFmpeg
             $process = new Process($command);
@@ -416,16 +534,31 @@ class VideoEncodeJob implements ShouldQueue
                     'path' => $mp4Path,
                     'file_size' => $fileSize
                 ]);
-                Log::info("Progressive MP4 profile {$videoProfile->getAttribute('profile')} encoded successfully");
+
+                $this->logFFmpegResult(true, $process->getOutput(), '', [
+                    'profile' => $videoProfile->getAttribute('profile'),
+                    'format' => 'progressive MP4',
+                    'output_path' => $mp4Path,
+                    'file_size' => $this->formatFileSize($fileSize ?? 0),
+                    'video_id' => $this->video->getAttribute('id'),
+                ]);
                 return true;
             } else {
                 $errorOutput = $process->getErrorOutput();
-                Log::error("Progressive MP4 profile {$videoProfile->getAttribute('profile')} encoding failed: {$errorOutput}");
+                $this->logFFmpegResult(false, $process->getOutput(), $errorOutput, [
+                    'profile' => $videoProfile->getAttribute('profile'),
+                    'format' => 'progressive MP4',
+                    'video_id' => $this->video->getAttribute('id'),
+                ]);
                 return false;
             }
 
         } catch (Exception $e) {
-            Log::error("Exception encoding progressive MP4 profile {$videoProfile->getAttribute('profile')}: " . $e->getMessage());
+            $this->logJobError('progressive encoding', $this->video->getAttribute('id'), "Exception: " . $e->getMessage(), [
+                'profile' => $videoProfile->getAttribute('profile'),
+                'exception' => get_class($e),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return false;
         }
     }
@@ -469,7 +602,11 @@ class VideoEncodeJob implements ShouldQueue
             // Update log with actual command
             $encodingLog->update(['ffmpeg_command' => implode(' ', $command)]);
 
-            Log::info("Starting HLS encoding for profile: {$videoProfile->getAttribute('profile')}");
+            $this->logFFmpegCommand($command, [
+                'profile' => $videoProfile->getAttribute('profile'),
+                'format' => 'HLS',
+                'video_id' => $this->video->getAttribute('id'),
+            ]);
 
             // Execute FFmpeg
             $process = new Process($command);
@@ -479,16 +616,30 @@ class VideoEncodeJob implements ShouldQueue
             if ($process->isSuccessful()) {
                 // Update profile with HLS path
                 $videoProfile->update(['hls_path' => $hlsDir . '/playlist.m3u8']);
-                Log::info("HLS profile {$videoProfile->getAttribute('profile')} encoded successfully");
+
+                $this->logFFmpegResult(true, $process->getOutput(), '', [
+                    'profile' => $videoProfile->getAttribute('profile'),
+                    'format' => 'HLS',
+                    'output_path' => $hlsDir . '/playlist.m3u8',
+                    'video_id' => $this->video->getAttribute('id'),
+                ]);
                 return true;
             } else {
                 $errorOutput = $process->getErrorOutput();
-                Log::error("HLS profile {$videoProfile->getAttribute('profile')} encoding failed: {$errorOutput}");
+                $this->logFFmpegResult(false, $process->getOutput(), $errorOutput, [
+                    'profile' => $videoProfile->getAttribute('profile'),
+                    'format' => 'HLS',
+                    'video_id' => $this->video->getAttribute('id'),
+                ]);
                 return false;
             }
 
         } catch (Exception $e) {
-            Log::error("Exception encoding HLS profile {$videoProfile->getAttribute('profile')}: " . $e->getMessage());
+            $this->logJobError('HLS encoding', $this->video->getAttribute('id'), "Exception: " . $e->getMessage(), [
+                'profile' => $videoProfile->getAttribute('profile'),
+                'exception' => get_class($e),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return false;
         }
     }
@@ -532,7 +683,11 @@ class VideoEncodeJob implements ShouldQueue
             // Update log with actual command
             $encodingLog->update(['ffmpeg_command' => implode(' ', $command)]);
 
-            Log::info("Starting DASH encoding for profile: {$videoProfile->getAttribute('profile')}");
+            $this->logFFmpegCommand($command, [
+                'profile' => $videoProfile->getAttribute('profile'),
+                'format' => 'DASH',
+                'video_id' => $this->video->getAttribute('id'),
+            ]);
 
             // Execute FFmpeg
             $process = new Process($command);
@@ -542,16 +697,30 @@ class VideoEncodeJob implements ShouldQueue
             if ($process->isSuccessful()) {
                 // Update profile with DASH path
                 $videoProfile->update(['dash_path' => $dashDir . '/manifest.mpd']);
-                Log::info("DASH profile {$videoProfile->getAttribute('profile')} encoded successfully");
+
+                $this->logFFmpegResult(true, $process->getOutput(), '', [
+                    'profile' => $videoProfile->getAttribute('profile'),
+                    'format' => 'DASH',
+                    'output_path' => $dashDir . '/manifest.mpd',
+                    'video_id' => $this->video->getAttribute('id'),
+                ]);
                 return true;
             } else {
                 $errorOutput = $process->getErrorOutput();
-                Log::error("DASH profile {$videoProfile->getAttribute('profile')} encoding failed: {$errorOutput}");
+                $this->logFFmpegResult(false, $process->getOutput(), $errorOutput, [
+                    'profile' => $videoProfile->getAttribute('profile'),
+                    'format' => 'DASH',
+                    'video_id' => $this->video->getAttribute('id'),
+                ]);
                 return false;
             }
 
         } catch (Exception $e) {
-            Log::error("Exception encoding DASH profile {$videoProfile->getAttribute('profile')}: " . $e->getMessage());
+            $this->logJobError('DASH encoding', $this->video->getAttribute('id'), "Exception: " . $e->getMessage(), [
+                'profile' => $videoProfile->getAttribute('profile'),
+                'exception' => get_class($e),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return false;
         }
     }

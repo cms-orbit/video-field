@@ -7,6 +7,7 @@ namespace CmsOrbit\VideoField\Entities\Video;
 use App\Services\DynamicModel;
 use App\Services\Traits\HasPermissions;
 use App\Services\Traits\SettingMenuItemTrait;
+use CmsOrbit\VideoField\Services\AbrManifestService;
 use CmsOrbit\VideoField\Traits\VideoStorageTrait;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -51,7 +52,6 @@ class Video extends DynamicModel
         'original_bitrate' => 'integer',
         'original_size' => 'integer',
         'user_id' => 'integer',
-        'meta_data' => 'array',
         'abr_profiles' => 'array',
     ];
 
@@ -317,7 +317,7 @@ class Video extends DynamicModel
      */
     public function regenerateManifests(): void
     {
-        $manifestService = new \CmsOrbit\VideoField\Services\AbrManifestService();
+        $manifestService = new AbrManifestService();
 
         // Generate HLS manifest
         $hlsPath = $manifestService->generateHlsManifest($this);

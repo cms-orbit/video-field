@@ -29,10 +29,10 @@ class VideoThumbnailJob implements ShouldQueue
     /**
      * Create a new job instance.
      */
-    public function __construct(Video $video, int $captureTime = 5, bool $force = false)
+    public function __construct(Video $video, ?int $captureTime = null, bool $force = false)
     {
         $this->video = $video;
-        $this->captureTime = $captureTime;
+        $this->captureTime = $captureTime ?? config('orbit-video.thumbnails.time_position', 5);
         $this->force = $force;
     }
 
@@ -85,81 +85,100 @@ class VideoThumbnailJob implements ShouldQueue
     private function generateThumbnail(): bool
     {
         try {
+            $videoId = $this->video->getAttribute('id');
+
             // Check if thumbnail already exists
             if ($this->video->getAttribute('thumbnail_path') && !$this->force) {
                 $disk = config('orbit-video.storage.disk');
-                if (Storage::disk($disk)->exists($this->video->getAttribute('thumbnail_path'))) {
-                    Log::info("Thumbnail already exists for video: {$this->video->getAttribute('id')}");
+                $existingPath = $this->video->getAttribute('thumbnail_path');
+                if (Storage::disk($disk)->exists($existingPath)) {
+                    $this->logInfo("Thumbnail already exists, skipping", [
+                        'video_id' => $videoId,
+                        'thumbnail_path' => $existingPath,
+                    ]);
                     return true;
                 }
             }
 
             // Check if FFmpeg is available
+            $this->logDebug("Checking FFmpeg availability for thumbnail generation", ['video_id' => $videoId]);
             if (!$this->checkFFmpeg()) {
-                $this->logJobError('thumbnail generation', $this->video->getAttribute('id'), 'FFmpeg not found');
+                $this->logJobError('thumbnail generation', $videoId, 'FFmpeg not found - please install FFmpeg');
                 return false;
             }
 
             // Find original file
             try {
+                $this->logDebug("Getting video path for thumbnail", ['video_id' => $videoId]);
                 $originalPath = $this->video->getVideoPath();
             } catch (Exception $e) {
-                $this->logJobError('thumbnail generation', $this->video->getAttribute('id'), 'Failed to get video path: ' . $e->getMessage());
+                $this->logJobError('thumbnail generation', $videoId, 'Failed to get video path: ' . $e->getMessage(), [
+                    'exception' => get_class($e),
+                    'trace' => $e->getTraceAsString(),
+                ]);
                 return false;
             }
 
             if (!$originalPath || !file_exists($originalPath)) {
-                $this->logJobError('thumbnail generation', $this->video->getAttribute('id'), 'Original video file not found at: ' . $originalPath);
+                $this->logJobError('thumbnail generation', $videoId, 'Original video file not found', [
+                    'expected_path' => $originalPath,
+                    'file_exists' => file_exists($originalPath ?? ''),
+                ]);
                 return false;
             }
 
+            $this->logInfo("Original video file found for thumbnail", [
+                'video_id' => $videoId,
+                'path' => $originalPath,
+            ]);
+
             // Validate capture time against video duration
             $captureTime = $this->captureTime;
-            if ($this->video->getAttribute('duration') && $captureTime >= $this->video->getAttribute('duration')) {
-                $captureTime = max(1, (int)($this->video->getAttribute('duration') / 2));
-                Log::info("Adjusted capture time to {$captureTime}s for video: {$this->video->getAttribute('id')}");
+            $duration = $this->video->getAttribute('duration');
+
+            if ($duration && $captureTime >= $duration) {
+                $captureTime = max(1, (int)($duration / 2));
+                $this->logInfo("Adjusted capture time to fit video duration", [
+                    'video_id' => $videoId,
+                    'original_capture_time' => $this->captureTime . 's',
+                    'adjusted_capture_time' => $captureTime . 's',
+                    'video_duration' => $duration . 's',
+                ]);
+            } else {
+                $this->logDebug("Using capture time: {$captureTime}s", [
+                    'video_id' => $videoId,
+                    'capture_time' => $captureTime . 's',
+                ]);
             }
 
             // Generate thumbnail
+            $this->logDebug("Generating thumbnail image", [
+                'video_id' => $videoId,
+                'capture_time' => $captureTime . 's',
+            ]);
+
             $thumbnailPath = $this->generateThumbnailImage($originalPath, $captureTime);
 
             if ($thumbnailPath) {
                 // Update video record with relative path
                 $this->video->update(['thumbnail_path' => $thumbnailPath]);
-                Log::info("Thumbnail saved to: {$thumbnailPath}");
+                $this->logInfo("Thumbnail generated and saved successfully", [
+                    'video_id' => $videoId,
+                    'thumbnail_path' => $thumbnailPath,
+                ]);
                 return true;
             } else {
-                Log::error("Failed to generate thumbnail image");
+                $this->logJobError('thumbnail generation', $videoId, 'Failed to generate thumbnail image');
                 return false;
             }
 
         } catch (Exception $e) {
-            Log::error("Exception in thumbnail generation: " . $e->getMessage());
+            $this->logJobError('thumbnail generation', $this->video->getAttribute('id'), "Exception: " . $e->getMessage(), [
+                'exception' => get_class($e),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return false;
         }
-    }
-
-
-    /**
-     * Find the original video file.
-     */
-    private function findOriginalFile(): ?string
-    {
-        $disk = config('orbit-video.storage.disk');
-        $videoPath = $this->video->getVideoPath();
-
-        $patterns = [
-            $videoPath . '/original_' . $this->video->getAttribute('original_filename'),
-            $videoPath . '/' . $this->video->getAttribute('original_filename'),
-        ];
-
-        foreach ($patterns as $pattern) {
-            if (Storage::disk($disk)->exists($pattern)) {
-                return Storage::disk($disk)->path($pattern);
-            }
-        }
-
-        return null;
     }
 
     /**
@@ -189,7 +208,12 @@ class VideoThumbnailJob implements ShouldQueue
             // Build FFmpeg command
             $command = $this->buildThumbnailCommand($originalPath, $fullThumbnailPath, $captureTime, $quality, $format);
 
-            Log::info("Executing FFmpeg command: " . implode(' ', $command));
+            $this->logFFmpegCommand($command, [
+                'video_id' => $this->video->getAttribute('id'),
+                'format' => $format,
+                'quality' => $quality,
+                'capture_time' => $captureTime . 's',
+            ]);
 
             // Execute FFmpeg
             $process = new Process($command);
@@ -200,19 +224,29 @@ class VideoThumbnailJob implements ShouldQueue
                 // Verify file was created
                 if (file_exists($fullThumbnailPath)) {
                     $fileSize = filesize($fullThumbnailPath);
-                    Log::info("Thumbnail generated successfully ({$this->formatFileSize($fileSize)})");
+                    $this->logFFmpegResult(true, $process->getOutput(), '', [
+                        'video_id' => $this->video->getAttribute('id'),
+                        'output_path' => $thumbnailPath,
+                        'file_size' => $this->formatFileSize($fileSize),
+                        'format' => $format,
+                    ]);
                     return $thumbnailPath;
                 } else {
-                    Log::error("Thumbnail file was not created");
+                    $this->logJobError('thumbnail generation', $this->video->getAttribute('id'), 'Thumbnail file was not created by FFmpeg');
                     return null;
                 }
             } else {
-                Log::error("FFmpeg error: " . $process->getErrorOutput());
+                $this->logFFmpegResult(false, $process->getOutput(), $process->getErrorOutput(), [
+                    'video_id' => $this->video->getAttribute('id'),
+                ]);
                 return null;
             }
 
         } catch (Exception $e) {
-            Log::error("Exception generating thumbnail: " . $e->getMessage());
+            $this->logJobError('thumbnail generation', $this->video->getAttribute('id'), "Exception: " . $e->getMessage(), [
+                'exception' => get_class($e),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return null;
         }
     }

@@ -94,16 +94,16 @@ class VideoServiceProvider extends ServiceProvider
     {
         // Register Stimulus controllers for Orchid fields
         if ($this->app->runningInConsole()) {
-            // Vite 별칭 등록 - 테마에서 @orbit/video로 접근 가능
+            // Vite 별칭 등록 - 테마에서 @orbit-video-field로 접근 가능
             $frontendPath = new ThemePathRegister(
-                '@orbit/video',
-                __DIR__ . '/../resources/js'
+                '@orbit-video-field',
+                __DIR__ . '/Fields/VideoField'
             );
             BuildThemeScripts::registerPath($frontendPath);
 
             // Tailwind CSS 경로 등록
             BuildThemeScripts::registerTailwindBase(
-                __DIR__ . '/../resources/js/**/**/*.vue'
+                __DIR__ . '/Fields/**/*.vue'
             );
         }
 
