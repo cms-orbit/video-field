@@ -277,6 +277,12 @@ const props = defineProps({
         required: false,
         default: false,
     },
+    // 강의 모드 (빨리감기 제한)
+    lectureMode: {
+        type: Boolean,
+        required: false,
+        default: false,
+    },
 });
 
 // 비디오 데이터 및 상태
@@ -291,6 +297,12 @@ const duration = ref(0);
 const volume = ref(1);
 const videoReady = ref(false);
 const isFullscreen = ref(false);
+
+// 시청 기록 상태
+const watchHistory = ref(null);
+const maxSeekableTime = ref(0);
+let watchHistoryInterval = null;
+let lastValidTime = ref(0); // 마지막 유효한 재생 시간 (seek 감지용)
 
 // Sprite 프리뷰
 const showSpritePreview = ref(false);
@@ -373,7 +385,28 @@ const debugLog = (...args) => {
 // 비디오 이벤트 핸들러
 const handleTimeUpdate = () => {
     if (videoElement.value) {
-        currentTime.value = videoElement.value.currentTime;
+        const newTime = videoElement.value.currentTime;
+        const timeDiff = newTime - lastValidTime.value;
+        
+        currentTime.value = newTime;
+        
+        // 강의 모드일 때 빨리감기 제한
+        if (props.lectureMode && maxSeekableTime.value > 0) {
+            // 시간이 2초 이상 갑자기 뛰었다면 seek로 판단 (빨리감기 시도)
+            if (timeDiff > 2 && newTime > maxSeekableTime.value) {
+                // 허용된 시간을 초과하는 seek는 차단
+                videoElement.value.currentTime = maxSeekableTime.value;
+                lastValidTime.value = maxSeekableTime.value;
+                debugLog('Seek blocked: max seekable time is', maxSeekableTime.value);
+                return;
+            }
+        }
+        
+        // 정상 재생: lastValidTime과 maxSeekableTime 업데이트
+        lastValidTime.value = newTime;
+        if (newTime > maxSeekableTime.value) {
+            maxSeekableTime.value = newTime;
+        }
     }
 };
 
@@ -394,6 +427,16 @@ const handleLoadedMetadata = () => {
         duration.value = videoElement.value.duration;
         videoReady.value = true;
         debugLog('Video metadata loaded, duration:', duration.value);
+        
+        // 시청 기록에서 재생 위치 복원
+        if (watchHistory.value?.seconds > 0) {
+            videoElement.value.currentTime = watchHistory.value.seconds;
+            lastValidTime.value = watchHistory.value.seconds;
+            debugLog('Restored playback position:', watchHistory.value.seconds);
+        }
+        
+        // 시청 기록 자동 저장 시작
+        startWatchHistoryTracking();
     }
 };
 
@@ -436,13 +479,28 @@ const seek = (event) => {
     
     const rect = event.currentTarget.getBoundingClientRect();
     const pos = (event.clientX - rect.left) / rect.width;
-    videoElement.value.currentTime = pos * duration.value;
+    let newTime = pos * duration.value;
+    
+    // 강의 모드일 때 빨리감기 제한
+    if (props.lectureMode && maxSeekableTime.value > 0 && newTime > maxSeekableTime.value) {
+        newTime = maxSeekableTime.value;
+        debugLog('Seek limited to max seekable time:', maxSeekableTime.value);
+    }
+    
+    videoElement.value.currentTime = newTime;
 };
 
 const seekBySeconds = (seconds) => {
     if (!videoElement.value || !duration.value) return;
     
-    const newTime = Math.max(0, Math.min(duration.value, currentTime.value + seconds));
+    let newTime = Math.max(0, Math.min(duration.value, currentTime.value + seconds));
+    
+    // 강의 모드일 때 빨리감기 제한
+    if (props.lectureMode && maxSeekableTime.value > 0 && newTime > maxSeekableTime.value) {
+        newTime = maxSeekableTime.value;
+        debugLog('Seek limited to max seekable time:', maxSeekableTime.value);
+    }
+    
     videoElement.value.currentTime = newTime;
 };
 
@@ -596,6 +654,57 @@ const extractedVideoId = computed(() => {
     return props.videoId;
 });
 
+// 시청 기록 관련 함수
+const startWatchHistoryTracking = () => {
+    if (!videoElement.value || watchHistoryInterval) return;
+    
+    const interval = 5000; // 5초마다 저장
+    
+    watchHistoryInterval = setInterval(() => {
+        if (isPlaying.value) {
+            saveWatchProgress();
+        }
+    }, interval);
+    
+    debugLog('Watch history tracking started');
+};
+
+const stopWatchHistoryTracking = () => {
+    if (watchHistoryInterval) {
+        clearInterval(watchHistoryInterval);
+        watchHistoryInterval = null;
+        debugLog('Watch history tracking stopped');
+    }
+};
+
+const saveWatchProgress = async () => {
+    const id = extractedVideoId.value;
+    if (!id || !videoElement.value) return;
+    
+    try {
+        const response = await axios.post(`/api/orbit-video-player/${id}/progress`, {
+            current_time: currentTime.value,
+            duration: duration.value,
+        });
+        
+        if (response.data.success && response.data.data) {
+            const oldPlayed = watchHistory.value?.played || 0;
+            watchHistory.value = response.data.data;
+            
+            // 서버에서 업데이트된 played 값으로 maxSeekableTime 갱신
+            // 단, 클라이언트의 현재 재생 위치가 더 크면 그것을 사용
+            maxSeekableTime.value = Math.max(
+                watchHistory.value.played,
+                currentTime.value
+            );
+            
+            debugLog('Watch progress saved:', response.data.data);
+        }
+    } catch (err) {
+        debugLog('Failed to save watch progress:', err);
+    }
+};
+
 // 비디오 정보 로드
 const loadVideoData = async () => {
     const id = extractedVideoId.value;
@@ -613,6 +722,13 @@ const loadVideoData = async () => {
         debugLog('Loading video data for ID:', id);
         const response = await axios.get(`/api/orbit-video-player/${id}`);
         videoData.value = response.data;
+        
+        // 시청 기록 로드
+        if (response.data.watch_history) {
+            watchHistory.value = response.data.watch_history;
+            maxSeekableTime.value = watchHistory.value.played || 0;
+            debugLog('Watch history loaded:', watchHistory.value);
+        }
 
         // loading을 먼저 false로 설정하여 DOM이 렌더링되도록 함
         loading.value = false;
@@ -652,6 +768,13 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+    // 시청 기록 최종 저장
+    if (isPlaying.value || currentTime.value > 0) {
+        saveWatchProgress();
+    }
+    
+    stopWatchHistoryTracking();
+    
     if (seekIndicatorTimeout) {
         clearTimeout(seekIndicatorTimeout);
     }

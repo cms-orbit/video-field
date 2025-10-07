@@ -165,4 +165,23 @@ return [
         'quality' => 70,
         'format' => 'jpeg',
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Player Configuration
+    |--------------------------------------------------------------------------
+    */
+    'player' => [
+        // 시청 완료 기준 (0.0 ~ 1.0, 예: 0.9 = 90%)
+        'completion_threshold' => env('VIDEO_COMPLETION_THRESHOLD', 0.9),
+
+        // 시청 기록 저장 간격 (초)
+        'watch_history_interval' => env('VIDEO_WATCH_HISTORY_INTERVAL', 5),
+
+        // 강의 모드 기본값 (true면 빨리감기 제한)
+        'lecture_mode_default' => env('VIDEO_LECTURE_MODE_DEFAULT', false),
+
+        // 시청 기록 자동 저장 활성화
+        'auto_save_progress' => env('VIDEO_AUTO_SAVE_PROGRESS', true),
+    ],
 ];

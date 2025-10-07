@@ -1,6 +1,6 @@
 {
     "name": "cms-orbit/video-field",
-    "version": "1.1.4",
+    "version": "1.1.5",
     "description": "A comprehensive video upload and multi-encoding system for CMS-Orbit with streaming support, transcoding, and thumbnails",
     "type": "library",
     "license": "MIT",

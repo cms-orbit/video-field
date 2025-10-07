@@ -26,13 +26,16 @@ Route::middleware(['web'])->prefix('api/orbit-video-player')->group(function () 
     // 비디오 정보 조회
     Route::get('/{id}', [VideoPlayerApiController::class, 'show'])->name('orbit-video-player.api.show');
     
+    // 시청 기록
+    Route::get('/{id}/watch-history', [VideoPlayerApiController::class, 'watchHistory'])->name('orbit-video-player.api.watch-history');
+    
     // 재생 이벤트
     Route::post('/{id}/play', [VideoPlayerApiController::class, 'recordPlay'])->name('orbit-video-player.api.play');
     Route::post('/{id}/pause', [VideoPlayerApiController::class, 'recordPause'])->name('orbit-video-player.api.pause');
     Route::post('/{id}/progress', [VideoPlayerApiController::class, 'recordProgress'])->name('orbit-video-player.api.progress');
     Route::post('/{id}/complete', [VideoPlayerApiController::class, 'recordComplete'])->name('orbit-video-player.api.complete');
     
-    // 재생 위치
+    // 재생 위치 (deprecated, use progress instead)
     Route::get('/{id}/position', [VideoPlayerApiController::class, 'position'])->name('orbit-video-player.api.position.get');
     Route::post('/{id}/position', [VideoPlayerApiController::class, 'position'])->name('orbit-video-player.api.position.save');
     

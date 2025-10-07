@@ -6,17 +6,22 @@ namespace CmsOrbit\VideoField\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use CmsOrbit\VideoField\Entities\Video\Video;
+use CmsOrbit\VideoField\Entities\Video\VideoWatchHistory;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Auth;
 
 class VideoPlayerApiController extends Controller
 {
     /**
      * Get video details for player.
      */
-    public function show(int $id): JsonResponse
+    public function show(Request $request, int $id): JsonResponse
     {
         $video = Video::with(['originalFile', 'profiles'])->findOrFail($id);
+
+        // 시청 기록 조회
+        $watchHistory = $this->getOrCreateWatchHistory($request, $id);
 
         return response()->json([
             'id' => $video->getAttribute('id'),
@@ -47,7 +52,69 @@ class VideoPlayerApiController extends Controller
                     'height' => $profile->getAttribute('height'),
                 ];
             }),
+            'watch_history' => $watchHistory ? [
+                'seconds' => $watchHistory->getAttribute('seconds'),
+                'played' => $watchHistory->getAttribute('played'),
+                'percent' => $watchHistory->getAttribute('percent'),
+                'is_complete' => $watchHistory->getAttribute('is_complete'),
+            ] : null,
         ]);
+    }
+
+    /**
+     * Get or create watch history for current user/session.
+     * 비회원으로 시청하다가 로그인하면 세션 기록을 유저에게 자동으로 연결
+     */
+    private function getOrCreateWatchHistory(Request $request, int $videoId): ?VideoWatchHistory
+    {
+        $user = Auth::user();
+        $sessionId = $request->session()->getId();
+
+        $query = VideoWatchHistory::where('video_id', $videoId);
+
+        if ($user) {
+            // 로그인한 경우: 먼저 유저 기록 찾기
+            $history = (clone $query)
+                ->where('watcher_id', $user->getAttribute('id'))
+                ->where('watcher_type', get_class($user))
+                ->first();
+
+            // 유저 기록이 없으면 세션 기록 찾아서 유저에게 연결
+            if (!$history) {
+                $sessionHistory = (clone $query)
+                    ->where('session_id', $sessionId)
+                    ->whereNull('watcher_id')
+                    ->first();
+
+                if ($sessionHistory) {
+                    // 세션 기록을 유저에게 연결
+                    $sessionHistory->watcher()->associate($user);
+                    $sessionHistory->save();
+                    $history = $sessionHistory;
+                }
+            }
+        } else {
+            // 비로그인: 세션 기록 찾기
+            $history = $query
+                ->where('session_id', $sessionId)
+                ->whereNull('watcher_id')
+                ->first();
+        }
+
+        // 기록이 없으면 새로 생성
+        if (!$history && config('orbit-video.player.auto_save_progress', true)) {
+            $history = new VideoWatchHistory();
+            $history->setAttribute('video_id', $videoId);
+            $history->setAttribute('session_id', $sessionId);
+            
+            if ($user) {
+                $history->watcher()->associate($user);
+            }
+            
+            $history->save();
+        }
+
+        return $history;
     }
 
     /**
@@ -103,21 +170,35 @@ class VideoPlayerApiController extends Controller
     public function recordProgress(Request $request, int $id): JsonResponse
     {
         $request->validate([
-            'timestamp' => 'required|numeric|min:0',
-            'percentage' => 'required|numeric|min:0|max:100',
+            'current_time' => 'required|numeric|min:0',
+            'duration' => 'required|numeric|min:0',
         ]);
 
         $video = Video::findOrFail($id);
+        $currentTime = (float) $request->get('current_time');
+        $duration = (float) $request->get('duration');
 
-        // TODO: 시청 진행률 기록
-        // - 현재 재생 위치
-        // - 시청 완료 비율
-        // - 세션 ID
+        $watchHistory = $this->getOrCreateWatchHistory($request, $id);
+
+        if ($watchHistory) {
+            $watchHistory->updateProgress($currentTime, $duration);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Progress recorded',
+                'data' => [
+                    'seconds' => $watchHistory->getAttribute('seconds'),
+                    'played' => $watchHistory->getAttribute('played'),
+                    'percent' => $watchHistory->getAttribute('percent'),
+                    'is_complete' => $watchHistory->getAttribute('is_complete'),
+                ],
+            ]);
+        }
 
         return response()->json([
-            'success' => true,
-            'message' => 'Progress recorded',
-        ]);
+            'success' => false,
+            'message' => 'Failed to record progress',
+        ], 500);
     }
 
     /**
@@ -144,7 +225,42 @@ class VideoPlayerApiController extends Controller
     }
 
     /**
+     * Get watch history for lecture mode.
+     */
+    public function watchHistory(Request $request, int $id): JsonResponse
+    {
+        $video = Video::findOrFail($id);
+        $watchHistory = $this->getOrCreateWatchHistory($request, $id);
+
+        if ($watchHistory) {
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'seconds' => $watchHistory->getAttribute('seconds'),
+                    'played' => $watchHistory->getAttribute('played'),
+                    'percent' => $watchHistory->getAttribute('percent'),
+                    'is_complete' => $watchHistory->getAttribute('is_complete'),
+                    'max_seekable_time' => $watchHistory->getMaxSeekableTime(),
+                ],
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'seconds' => 0,
+                'played' => 0,
+                'percent' => 0,
+                'is_complete' => false,
+                'max_seekable_time' => 0,
+            ],
+        ]);
+    }
+
+    /**
      * Get or save video playback position.
+     *
+     * @deprecated Use recordProgress instead
      */
     public function position(Request $request, int $id): JsonResponse
     {
@@ -156,20 +272,28 @@ class VideoPlayerApiController extends Controller
                 'position' => 'required|numeric|min:0',
             ]);
 
-            // TODO: 재생 위치 저장
-            // - 사용자별 마지막 재생 위치 저장
-            // - 로그인하지 않은 경우 세션 또는 로컬스토리지 활용
+            $watchHistory = $this->getOrCreateWatchHistory($request, $id);
+
+            if ($watchHistory) {
+                $duration = $video->getAttribute('duration') ?? 0;
+                $watchHistory->updateProgress((float) $request->get('position'), $duration);
+
+                return response()->json([
+                    'success' => true,
+                    'position' => $request->get('position'),
+                    'message' => 'Position saved',
+                ]);
+            }
 
             return response()->json([
-                'success' => true,
-                'position' => $request->get('position'),
-                'message' => 'Position saved',
-            ]);
+                'success' => false,
+                'message' => 'Failed to save position',
+            ], 500);
         }
 
         // Get saved position
-        // TODO: 저장된 재생 위치 불러오기
-        $savedPosition = 0; // 실제로는 DB나 세션에서 가져와야 함
+        $watchHistory = $this->getOrCreateWatchHistory($request, $id);
+        $savedPosition = $watchHistory?->getAttribute('seconds') ?? 0;
 
         return response()->json([
             'position' => $savedPosition,
