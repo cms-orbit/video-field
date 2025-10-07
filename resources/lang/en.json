@@ -47,5 +47,17 @@
     "All processing completed successfully": "All processing completed successfully",
     "Some steps failed during processing": "Some steps failed during processing",
     "Uploaded Video": "Uploaded Video",
-    "Remove video": "Remove video"
+    "Remove video": "Remove video",
+    "Loading video...": "Loading video...",
+    "Failed to load video": "Failed to load video",
+    "Video is being processed": "Video is being processed",
+    "complete": "complete",
+    "Your browser does not support video playback.": "Your browser does not support video playback.",
+    "No video available": "No video available",
+    "No video ID provided": "No video ID provided",
+    "Failed to load video data": "Failed to load video data",
+    "No compatible video format available": "No compatible video format available",
+    "Unknown video error": "Unknown video error",
+    "Video playback error: ": "Video playback error: ",
+    "Failed to initialize video player": "Failed to initialize video player"
 }

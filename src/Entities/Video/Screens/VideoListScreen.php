@@ -7,6 +7,8 @@ namespace CmsOrbit\VideoField\Entities\Video\Screens;
 use CmsOrbit\VideoField\Entities\Video\Layouts\VideoUploadLayout;
 use CmsOrbit\VideoField\Entities\Video\Video;
 use CmsOrbit\VideoField\Entities\Video\Layouts\VideoListLayout;
+use CmsOrbit\VideoField\Entities\Video\Layouts\Modals\VideoRelationsModal;
+use CmsOrbit\VideoField\Entities\Video\VideoFieldRelation;
 use App\Settings\Extends\OrbitLayout;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -83,6 +85,13 @@ class VideoListScreen extends Screen
                 ->applyButton(__('Upload'))
                 ->size(Modal::SIZE_LG)
                 ->closeButton(__('Cancel')),
+
+            OrbitLayout::modal('videoRelationsModal', [
+                VideoRelationsModal::class
+            ])->title(__('Video Relations'))
+                ->size(Modal::SIZE_LG)
+                ->withoutApplyButton()
+                ->async('asyncGetRelations'),
         ];
     }
 
@@ -116,6 +125,44 @@ class VideoListScreen extends Screen
                 'original_file_id' => $uploadedVideo,
             ]);
         }
+        return redirect()->route('settings.entities.videos');
+    }
+
+    /**
+     * Get relations for a video (async for modal).
+     */
+    public function asyncGetRelations(Request $request): array
+    {
+        $videoId = $request->get('video');
+        $video = Video::findOrFail($videoId);
+
+        $relations = $video->relatedModels()
+            ->orderBy('model_type')
+            ->orderBy('model_id')
+            ->get();
+
+        return [
+            'videoRelationsModal.relations' => $relations,
+        ];
+    }
+
+    /**
+     * Detach a video relation.
+     */
+    public function detachRelation($relationKey): RedirectResponse
+    {
+        /** @var User $user */
+        $user = Auth::user();
+
+        if (!$user->hasAccess('settings.entities.videos.edit')) {
+            Toast::error(__('You do not have permission to modify video relations.'));
+            return redirect()->route('settings.entities.videos');
+        }
+
+        $conditions = json_decode(base64_decode($relationKey),true);
+        $relation = VideoFieldRelation::query()->where($conditions)->delete();
+
+        Toast::success(__('Relation has been detached successfully.'));
         return redirect()->route('settings.entities.videos');
     }
 }

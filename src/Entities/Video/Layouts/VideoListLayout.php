@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Auth;
 use Orchid\Screen\Actions\Button;
 use Orchid\Screen\Actions\DropDown;
 use Orchid\Screen\Actions\Link;
+use Orchid\Screen\Actions\ModalToggle;
 use Orchid\Screen\Fields\Group;
 use Orchid\Screen\Layouts\Table;
 use Orchid\Screen\TD;
@@ -32,15 +33,15 @@ class VideoListLayout extends Table
                 ->width('60px'),
 
             TD::make('thumbnail', __('Thumbnail'))
-                ->width('80px')
+                ->width('120px')
                 ->render(function (Video $video) {
                     if ($video->hasThumbnail()) {
                         $thumbnailUrl = $video->getThumbnailUrl();
                         if ($thumbnailUrl) {
-                            return "<img src='{$thumbnailUrl}' class='img-thumbnail' style='width: 60px; height: 40px; object-fit: cover;' alt='Video thumbnail'>";
+                            return "<div style='width: 100%; height: 60px; background-image: url(\"{$thumbnailUrl}\"); background-size: cover; background-position: center; border-radius: 4px;'></div>";
                         }
                     }
-                    return "<div class='bg-light d-flex align-items-center justify-content-center' style='width: 60px; height: 40px;'><i class='bs bs-play-circle text-muted'></i></div>";
+                    return "<div class='bg-light d-flex align-items-center justify-content-center' style='width: 100%; height: 80px; border-radius: 4px;'><i class='bs bs-play-circle text-muted' style='font-size: 24px;'></i></div>";
                 }),
 
             TD::make('title', __('Title'))
@@ -58,7 +59,7 @@ class VideoListLayout extends Table
 
                     return Link::make($video->getAttribute('title'))
                             ->route('settings.entities.videos.edit', $video) .
-                        "<br /><small class='text-muted'>{$filename} • {$size} • {$mimeType}</small>";
+                        "<small class='text-muted'>{$filename} • {$size} • {$mimeType}</small>";
                 }),
 
             TD::make('video_info', __('Video Info'))
@@ -138,19 +139,20 @@ class VideoListLayout extends Table
                     </div>";
                 }),
 
-            TD::make('storage_info', __('Storage'))
+            TD::make('relations', __('Relations'))
+                ->width('100px')
                 ->render(function (Video $video) {
-                    $hls = $video->getAttribute('hls_manifest_path') ? 'HLS' : '';
-                    $dash = $video->getAttribute('dash_manifest_path') ? 'DASH' : '';
-                    $sprite = $video->hasSprite() ? 'Sprite' : '';
-                    $thumbnail = $video->hasThumbnail() ? 'Thumb' : '';
+                    $relationsCount = $video->relatedModels()->count();
 
-                    $features = array_filter([$hls, $dash, $sprite, $thumbnail]);
-                    $featuresText = implode(', ', $features);
+                    if ($relationsCount === 0) {
+                        return '<span class="text-muted">' . __('No relations') . '</span>';
+                    }
 
-                    return "<div>
-                        <small class='text-muted'>{$featuresText}</small>
-                    </div>";
+                    return ModalToggle::make(__(':count Relations',['count' => $relationsCount]))
+                        ->modal('videoRelationsModal')
+                        ->modalTitle(__('Video Relations'))
+                        ->asyncParameters(['video' => $video->getKey()])
+                        ->class('btn btn-link p-0');
                 }),
 
             TD::make('created_at', __('Created'))

@@ -85,9 +85,9 @@ class VideoEditScreen extends Screen
         // Save 버튼 (항상 표시)
         $commands[] = Button::make(__('Save'))
             ->icon('bs.check-circle')
-            ->method('save')
+            ->method('updateVideo')
             ->class('btn btn-primary')
-            ->canSee($this->video->exists || request()->has('video.title'));
+            ->canSee($this->video->exists);
 
         // Regenerate Manifests 버튼 (인코딩이 완료된 경우)
         $commands[] = Button::make(__('Regenerate Manifests'))
@@ -155,14 +155,14 @@ class VideoEditScreen extends Screen
      *
      * @return \Illuminate\Http\RedirectResponse
      */
-    public function save(Request $request, Video $video)
+    public function updateVideo(Request $request, Video $video)
     {
         $args = $request->get('video');
 
         $attachmentId = Arr::get($args,'thumbnail_url');
-        if($attachmentId){
-            /** @var Attachment $thumbnail */
-            $thumbnail = Attachment::query()->findOrFail($attachmentId);
+        /** @var Attachment $thumbnail */
+        $thumbnail = Attachment::query()->find($attachmentId);
+        if($thumbnail){
             $video->setAttribute('thumbnail_path',$thumbnail->physicalPath());
         }
 

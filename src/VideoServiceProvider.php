@@ -105,9 +105,20 @@ class VideoServiceProvider extends ServiceProvider
             BuildThemeScripts::registerTailwindBase(
                 __DIR__ . '/Fields/**/*.vue'
             );
-        }
 
-        BuildThemeScripts::registerController('video',__DIR__ . '/Fields/VideoField/js/video_controller.js');
+            $frontendPath = new ThemePathRegister(
+                '@orbit/video',
+                __DIR__ . '/../resources/js'
+            );
+            BuildThemeScripts::registerPath($frontendPath);
+
+            // Tailwind CSS 경로 등록
+            BuildThemeScripts::registerTailwindBase(
+                __DIR__ . '/../resources/js/**/*.vue'
+            );
+
+            BuildThemeScripts::registerController('video',__DIR__ . '/Fields/VideoField/js/video_controller.js');
+        }
     }
 
     /**

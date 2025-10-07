@@ -153,34 +153,6 @@ class VideoApiController extends Controller
     }
 
     /**
-     * Get video details by ID.
-     */
-    public function show(int $id): JsonResponse
-    {
-        $video = Video::with('originalFile')->findOrFail($id);
-
-        return response()->json([
-            'id' => $video->getAttribute('id'),
-            'title' => $video->getAttribute('title'),
-            'filename' => $video->originalFile?->getAttribute('original_name') ?? $video->getAttribute('title'),
-            'duration' => $video->getAttribute('duration'),
-            'file_size' => $video->originalFile?->getAttribute('size') ?? 0,
-            'status' => $video->getAttribute('status'),
-            'thumbnail_url' => $video->getThumbnailUrl(),
-            'created_at' => $video->getAttribute('created_at'),
-            'encoding_progress' => $video->getEncodingProgress(),
-            'profiles' => $video->profiles->map(function ($profile) {
-                return [
-                    'profile' => $profile->getAttribute('profile'),
-                    'encoded' => $profile->getAttribute('encoded'),
-                    'resolution' => $profile->getResolution(),
-                    'quality_label' => $profile->getQualityLabel(),
-                ];
-            }),
-        ]);
-    }
-
-    /**
      * Create video from existing attachment.
      */
     public function createFromAttachment(Request $request): JsonResponse

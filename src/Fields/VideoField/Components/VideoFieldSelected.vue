@@ -2,8 +2,7 @@
     <div class="mb-4">
         <div class="p-2 border rounded">
             <div class="">
-                <!-- xl 이상: flex-row, 그 이하는 flex-col -->
-                <div class="flex flex-col gap-3 relative">
+                <div class="flex flex-col gap-1 relative">
                     <!-- 썸네일 + 상태 뱃지 -->
                     <div class="relative w-full flex-shrink-0">
                         <span
@@ -29,7 +28,7 @@
                         </div>
                     </div>
 
-                    <div class="flex flex-col flex-1 justify-center xl:pl-4 relative">
+                    <div class="flex flex-col flex-1 justify-center relative">
                         <!-- 제목 -->
                         <div class="flex items-center">
                             <h6 class="flex-1 card-title text-base font-semibold truncate">
@@ -75,7 +74,7 @@ const formatDuration = (seconds) => {
     const hours = Math.floor(seconds / 3600)
     const minutes = Math.floor((seconds % 3600) / 60)
     const secs = Math.floor(seconds % 60)
-    
+
     if (hours > 0) {
         return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
     }

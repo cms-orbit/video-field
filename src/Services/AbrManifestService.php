@@ -54,7 +54,8 @@ class AbrManifestService
     }
 
     /**
-     * Generate DASH manifest (mpd) for a video.
+     * Generate DASH ABR manifest (mpd) for a video.
+     * Parses FFmpeg-generated manifests and combines them into ABR manifest.
      */
     public function generateDashManifest(Video $video): ?string
     {
@@ -74,17 +75,25 @@ class AbrManifestService
                 return null;
             }
 
-            $manifestContent = $this->buildDashManifest($video, $profiles);
+            $disk = config('orbit-video.storage.disk');
+            
+            // Parse FFmpeg-generated manifests and build ABR manifest
+            $manifestContent = $this->buildAbrDashManifest($video, $profiles, $disk);
+            
+            if (!$manifestContent) {
+                Log::error("Failed to build ABR DASH manifest for video: {$video->getAttribute('id')}");
+                return null;
+            }
+
             $videoDir = $this->getVideoDirectory($video);
             $manifestPath = $videoDir . '/manifest.mpd';
 
-            $disk = config('orbit-video.storage.disk');
             Storage::disk($disk)->put($manifestPath, $manifestContent);
 
             // Update video record
             $video->update(['dash_manifest_path' => $manifestPath]);
 
-            Log::info("DASH manifest generated for video: {$video->getAttribute('id')}");
+            Log::info("ABR DASH manifest generated for video: {$video->getAttribute('id')} with {$profiles->count()} profiles");
             return $manifestPath;
 
         } catch (\Exception $e) {
@@ -121,7 +130,154 @@ class AbrManifestService
     }
 
     /**
-     * Build DASH manifest content.
+     * Build ABR DASH manifest by parsing FFmpeg-generated manifests.
+     */
+    private function buildAbrDashManifest(Video $video, $profiles, $disk): ?string
+    {
+        try {
+            $duration = $video->getAttribute('duration') ?? 0;
+            
+            // Parse first profile's manifest to get audio and basic structure
+            $firstProfile = $profiles->first();
+            $firstManifestPath = dirname($firstProfile->getAttribute('dash_path')) . '/manifest.mpd';
+            
+            if (!Storage::disk($disk)->exists($firstManifestPath)) {
+                Log::error("First profile manifest not found: {$firstManifestPath}");
+                return null;
+            }
+            
+            $firstManifestXml = Storage::disk($disk)->get($firstManifestPath);
+            $firstXml = simplexml_load_string($firstManifestXml);
+            
+            if (!$firstXml) {
+                Log::error("Failed to parse first profile manifest");
+                return null;
+            }
+            
+            // Build ABR manifest
+            $content = '<?xml version="1.0" encoding="utf-8"?>' . "\n";
+            $content .= '<MPD xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"' . "\n";
+            $content .= "\txmlns=\"urn:mpeg:dash:schema:mpd:2011\"" . "\n";
+            $content .= "\txmlns:xlink=\"http://www.w3.org/1999/xlink\"" . "\n";
+            $content .= "\txsi:schemaLocation=\"urn:mpeg:DASH:schema:MPD:2011 http://standards.iso.org/ittf/PubliclyAvailableStandards/MPEG-DASH_schema_files/DASH-MPD.xsd\"" . "\n";
+            $content .= "\tprofiles=\"urn:mpeg:dash:profile:isoff-live:2011\"" . "\n";
+            $content .= "\ttype=\"static\"" . "\n";
+            $content .= "\tmediaPresentationDuration=\"PT{$duration}S\"" . "\n";
+            $content .= "\tmaxSegmentDuration=\"PT10.0S\"" . "\n";
+            $content .= "\tminBufferTime=\"PT33.3S\">" . "\n";
+            $content .= "\t<ProgramInformation>" . "\n";
+            $content .= "\t</ProgramInformation>" . "\n";
+            $content .= "\t<ServiceDescription id=\"0\">" . "\n";
+            $content .= "\t</ServiceDescription>" . "\n";
+            $content .= "\t<Period id=\"0\" start=\"PT0.0S\">" . "\n";
+            
+            // Video AdaptationSet with all profiles
+            $firstXml->registerXPathNamespace('mpd', 'urn:mpeg:dash:schema:mpd:2011');
+            $videoAdaptation = $firstXml->xpath('//mpd:AdaptationSet[@contentType="video"]')[0] ?? null;
+            
+            if ($videoAdaptation) {
+                $content .= "\t\t<AdaptationSet id=\"0\" contentType=\"video\" startWithSAP=\"1\" segmentAlignment=\"true\" bitstreamSwitching=\"true\" frameRate=\"{$videoAdaptation['frameRate']}\" maxWidth=\"{$videoAdaptation['maxWidth']}\" maxHeight=\"{$videoAdaptation['maxHeight']}\" par=\"{$videoAdaptation['par']}\" lang=\"und\">" . "\n";
+                
+                // Add all profile video representations
+                $repId = 0;
+                foreach ($profiles as $profile) {
+                    $profileManifestPath = dirname($profile->getAttribute('dash_path')) . '/manifest.mpd';
+                    
+                    if (!Storage::disk($disk)->exists($profileManifestPath)) {
+                        continue;
+                    }
+                    
+                    $profileManifestXml = Storage::disk($disk)->get($profileManifestPath);
+                    $profileXml = simplexml_load_string($profileManifestXml);
+                    $profileXml->registerXPathNamespace('mpd', 'urn:mpeg:dash:schema:mpd:2011');
+                    
+                    $videoRep = $profileXml->xpath('//mpd:AdaptationSet[@contentType="video"]//mpd:Representation')[0] ?? null;
+                    
+                    if ($videoRep) {
+                        $profileName = $profile->getAttribute('profile');
+                        $profileDir = basename(dirname($profile->getAttribute('dash_path')));
+                        
+                        $content .= "\t\t\t<Representation id=\"{$repId}\" mimeType=\"{$videoRep['mimeType']}\" codecs=\"{$videoRep['codecs']}\" bandwidth=\"{$videoRep['bandwidth']}\" width=\"{$videoRep['width']}\" height=\"{$videoRep['height']}\" sar=\"{$videoRep['sar']}\">" . "\n";
+                        
+                        $segmentTemplate = $videoRep->SegmentTemplate;
+                        if ($segmentTemplate) {
+                            // 항상 stream0 사용 (각 프로파일 디렉토리 안에서는 모두 stream0)
+                            $content .= "\t\t\t\t<SegmentTemplate timescale=\"{$segmentTemplate['timescale']}\" initialization=\"dash/{$profileDir}/init-stream0.m4s\" media=\"dash/{$profileDir}/chunk-stream0-\$Number%05d\$.m4s\" startNumber=\"{$segmentTemplate['startNumber']}\">" . "\n";
+                            $content .= "\t\t\t\t\t<SegmentTimeline>" . "\n";
+                            
+                            foreach ($segmentTemplate->SegmentTimeline->S as $s) {
+                                $content .= "\t\t\t\t\t\t<S";
+                                if (isset($s['t'])) $content .= " t=\"{$s['t']}\"";
+                                if (isset($s['d'])) $content .= " d=\"{$s['d']}\"";
+                                if (isset($s['r'])) $content .= " r=\"{$s['r']}\"";
+                                $content .= " />" . "\n";
+                            }
+                            
+                            $content .= "\t\t\t\t\t</SegmentTimeline>" . "\n";
+                            $content .= "\t\t\t\t</SegmentTemplate>" . "\n";
+                        }
+                        
+                        $content .= "\t\t\t</Representation>" . "\n";
+                    }
+                    
+                    $repId++;
+                }
+                
+                $content .= "\t\t</AdaptationSet>" . "\n";
+            }
+            
+            // Audio AdaptationSet from first profile
+            $audioAdaptation = $firstXml->xpath('//mpd:AdaptationSet[@contentType="audio"]')[0] ?? null;
+            
+            if ($audioAdaptation) {
+                $content .= "\t\t<AdaptationSet id=\"1\" contentType=\"audio\" startWithSAP=\"1\" segmentAlignment=\"true\" bitstreamSwitching=\"true\" lang=\"und\">" . "\n";
+                
+                $audioRep = $audioAdaptation->Representation;
+                if ($audioRep) {
+                    $profileDir = basename(dirname($firstProfile->getAttribute('dash_path')));
+                    
+                    $content .= "\t\t\t<Representation id=\"1\" mimeType=\"{$audioRep['mimeType']}\" codecs=\"{$audioRep['codecs']}\" bandwidth=\"{$audioRep['bandwidth']}\" audioSamplingRate=\"{$audioRep['audioSamplingRate']}\">" . "\n";
+                    $content .= "\t\t\t\t<AudioChannelConfiguration schemeIdUri=\"urn:mpeg:dash:23003:3:audio_channel_configuration:2011\" value=\"2\" />" . "\n";
+                    
+                    $segmentTemplate = $audioRep->SegmentTemplate;
+                    if ($segmentTemplate) {
+                        $content .= "\t\t\t\t<SegmentTemplate timescale=\"{$segmentTemplate['timescale']}\" initialization=\"dash/{$profileDir}/init-stream1.m4s\" media=\"dash/{$profileDir}/chunk-stream1-\$Number%05d\$.m4s\" startNumber=\"{$segmentTemplate['startNumber']}\">" . "\n";
+                        $content .= "\t\t\t\t\t<SegmentTimeline>" . "\n";
+                        
+                        foreach ($segmentTemplate->SegmentTimeline->S as $s) {
+                            $content .= "\t\t\t\t\t\t<S";
+                            if (isset($s['t'])) $content .= " t=\"{$s['t']}\"";
+                            if (isset($s['d'])) $content .= " d=\"{$s['d']}\"";
+                            if (isset($s['r'])) $content .= " r=\"{$s['r']}\"";
+                            $content .= " />" . "\n";
+                        }
+                        
+                        $content .= "\t\t\t\t\t</SegmentTimeline>" . "\n";
+                        $content .= "\t\t\t\t</SegmentTemplate>" . "\n";
+                    }
+                    
+                    $content .= "\t\t\t</Representation>" . "\n";
+                }
+                
+                $content .= "\t\t</AdaptationSet>" . "\n";
+            }
+            
+            $content .= "\t</Period>" . "\n";
+            $content .= "</MPD>" . "\n";
+            
+            return $content;
+            
+        } catch (\Exception $e) {
+            Log::error("Failed to build ABR DASH manifest", [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Build DASH manifest content (legacy, kept for reference).
      */
     private function buildDashManifest(Video $video, $profiles): string
     {

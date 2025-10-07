@@ -628,7 +628,286 @@ MIT License
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
+## 프론트엔드 비디오 플레이어
+
+### Player Vue 컴포넌트
+
+DASH/HLS 적응형 스트리밍을 지원하는 강력하고 커스터마이징 가능한 비디오 플레이어입니다.
+
+#### 주요 기능
+
+- 🎬 **커스텀 컨트롤**: 재생/일시정지, 프로그레스 바, 볼륨, 전체화면
+- 🎨 **화질 선택**: Auto ABR 또는 수동 화질 선택 (1080p, 720p, 480p 등)
+- 📥 **다운로드 기능**: Progressive 프로파일 다운로드
+- 🖼️ **Sprite 프리뷰**: 프로그레스 바 호버 시 비디오 프레임 미리보기
+- 📝 **제목/설명 오버레이**: 마우스 호버 시 좌상단에 비디오 정보 표시
+- 🧩 **커스텀 액션 슬롯**: 공유, 좋아요 등 사용자 정의 버튼 추가
+- 🎛️ **완전한 Props 제어**: autoplay, loop, muted 등 비디오 속성 제어
+- 📱 **반응형 디자인**: 모바일/데스크톱 최적화
+- 🔄 **자동 스트리밍 폴백**: DASH → HLS → Progressive 순서로 자동 시도
+- 🚀 **동적 라이브러리 로딩**: HLS.js 및 Dash.js를 필요 시 자동 로드
+- ⚡ **인코딩 상태 표시**: 처리 중인 비디오의 진행률 실시간 표시
+
+#### 기본 사용법
+
+```vue
+<template>
+    <div>
+        <!-- 기본 플레이어 (네이티브 컨트롤) -->
+        <Player :video="announcement.featured_video" />
+        
+        <!-- 비디오 ID만 전달 -->
+        <Player :video-id="123" />
+        
+        <!-- 커스텀 컨트롤 + 화질 선택 + 다운로드 -->
+        <Player 
+            :video="video"
+            :use-native-controls="false"
+            :show-quality-selector="true"
+            :show-download="true"
+            :autoplay="false"
+            :loop="false"
+            class="w-full aspect-video rounded-lg"
+        />
+    </div>
+</template>
+
+<script setup>
+import Player from '@orbit/video/Player.vue';
+</script>
+```
+
+#### Props 옵션
+
+**비디오 데이터**
+- `video` (Object): 비디오 객체
+- `videoId` (Number): 비디오 ID
+
+**비디오 기본 속성**
+- `autoplay` (Boolean, default: false): 자동 재생
+- `loop` (Boolean, default: false): 반복 재생
+- `muted` (Boolean, default: false): 음소거
+- `playsinline` (Boolean, default: true): 인라인 재생 (iOS)
+- `preload` (String, default: 'metadata'): 프리로드 옵션
+
+**플레이어 UI 옵션**
+- `useNativeControls` (Boolean, default: false): 네이티브 컨트롤 사용
+- `showQualitySelector` (Boolean, default: true): 화질 선택 표시
+- `showDownload` (Boolean, default: false): 다운로드 버튼 표시
+- `showTitle` (Boolean, default: false): 제목 오버레이 표시 (마우스 오버 시)
+- `showDescription` (Boolean, default: false): 설명 오버레이 표시 (마우스 오버 시)
+- `debug` (Boolean, default: false): 디버그 모드
+
+#### 커스텀 액션 슬롯
+
+사용자 정의 버튼을 추가할 수 있습니다:
+
+```vue
+<Player :video="video" :use-native-controls="false">
+    <template #actions="{ videoData, player, isPlaying }">
+        <!-- 공유 버튼 -->
+        <button @click="shareVideo(videoData)" class="control-button">
+            <ShareIcon />
+        </button>
+        
+        <!-- 좋아요 버튼 -->
+        <button @click="likeVideo(videoData)" class="control-button">
+            <HeartIcon />
+        </button>
+    </template>
+</Player>
+```
+
+**슬롯 Props**
+- `videoData`: 비디오 정보 객체
+- `player`: 플레이어 인스턴스 (DASH 또는 HLS)
+- `isPlaying`: 재생 중 여부
+
+#### 사용 예시 (실전 코드)
+
+다양한 실전 예시 코드를 제공합니다:
+
+1. **[BasicPlayer.vue](docs/examples/BasicPlayer.vue)** - 가장 간단한 기본 플레이어
+2. **[CustomControlsPlayer.vue](docs/examples/CustomControlsPlayer.vue)** - 커스텀 컨트롤 + 화질 선택 + 다운로드
+3. **[AutoplayLoopPlayer.vue](docs/examples/AutoplayLoopPlayer.vue)** - 배경 비디오용 자동재생 + 반복
+4. **[CustomActionsPlayer.vue](docs/examples/CustomActionsPlayer.vue)** - 공유/좋아요/재생목록 커스텀 버튼
+5. **[TitleOverlayPlayer.vue](docs/examples/TitleOverlayPlayer.vue)** - 제목/설명 오버레이 표시
+
+각 예시는 복사해서 바로 사용할 수 있습니다. 자세한 내용은 [예시 가이드](docs/examples/README.md)를 참고하세요.
+
+#### 화질 선택 기능
+
+ABR(Adaptive Bitrate) 스트리밍 환경에서 화질을 선택할 수 있습니다:
+
+- **Auto**: 네트워크 상태에 따라 자동으로 최적 화질 선택
+- **수동 선택**: 사용자가 원하는 화질 고정 (1080p, 720p, 480p 등)
+
+```vue
+<Player 
+    :video="video"
+    :show-quality-selector="true"
+    :use-native-controls="false"
+/>
+```
+
+#### 다운로드 기능
+
+Progressive 인코딩된 프로파일이 있으면 다운로드 버튼이 활성화됩니다:
+
+```vue
+<Player 
+    :video="video"
+    :show-download="true"
+    :use-native-controls="false"
+/>
+```
+
+다운로드 메뉴에는 화질 레이블과 파일 크기가 표시됩니다.
+
+#### 제목/설명 오버레이
+
+비디오에 마우스를 올리면 좌상단에 제목과 설명이 표시됩니다:
+
+```vue
+<Player 
+    :video="video"
+    :show-title="true"
+    :show-description="true"
+    :use-native-controls="false"
+/>
+```
+
+**특징**:
+- 마우스 호버 시 부드러운 페이드 인/아웃 애니메이션
+- 그라데이션 배경으로 가독성 향상
+- 설명은 최대 3줄까지 표시 (초과 시 말줄임표)
+- 각각 독립적으로 활성화/비활성화 가능
+
+#### 주의사항
+
+1. **자동재생 정책**: 대부분의 브라우저는 음소거되지 않은 자동재생을 차단합니다. 자동재생을 원한다면 `muted` 옵션을 함께 사용하세요.
+
+   ```vue
+   <Player :autoplay="true" :muted="true" />
+   ```
+
+2. **모바일 인라인 재생**: iOS에서 전체화면을 피하려면 `playsinline` 옵션을 true로 설정하세요.
+
+3. **Progressive vs Adaptive**: Progressive는 단일 화질, Adaptive(DASH/HLS)는 다중 화질을 지원합니다.
+
+4. **다운로드 권한**: 저작권이 있는 콘텐츠의 경우 `showDownload`를 false로 설정하세요.
+
+#### 브라우저 지원
+
+- **DASH**: Chrome, Firefox, Edge, Safari (dash.js 사용)
+- **HLS**: Safari (네이티브), Chrome/Firefox/Edge (hls.js 사용)
+- **Progressive**: 모든 브라우저
+
+플레이어는 자동으로 브라우저에 맞는 최적의 스트리밍 방식을 선택합니다.
+
+### Video Player API
+
+프론트엔드 플레이어를 위한 전용 API를 제공합니다.
+
+#### 주요 엔드포인트
+
+```
+GET  /api/orbit-video-player/{id}              # 비디오 정보 조회
+POST /api/orbit-video-player/{id}/play         # 재생 시작 이벤트
+POST /api/orbit-video-player/{id}/pause        # 일시정지 이벤트
+POST /api/orbit-video-player/{id}/progress     # 재생 진행률 기록
+POST /api/orbit-video-player/{id}/complete     # 재생 완료 이벤트
+GET  /api/orbit-video-player/{id}/position     # 재생 위치 불러오기
+POST /api/orbit-video-player/{id}/position     # 재생 위치 저장
+POST /api/orbit-video-player/{id}/view         # 조회수 증가
+POST /api/orbit-video-player/{id}/report-issue # 문제 리포트
+GET  /api/orbit-video-player/{id}/analytics    # 분석 데이터 (관리자)
+```
+
+#### 구현 예정 기능
+
+- 재생 이벤트 로깅
+- 시청 시간 추적
+- 시청 완료율 분석
+- 재생 위치 저장/복원
+- 조회수 관리
+- 화질별 선택 통계
+- 문제 리포트 시스템
+
+자세한 API 문서는 [PLAYER_API.md](docs/PLAYER_API.md)를 참고하세요.
+
 ## 변경 로그
+
+### v1.3.0 (2025-10-07)
+
+#### Video Player 대폭 개선 🎉
+
+**커스터마이징 가능한 Props 추가**
+- 비디오 기본 속성: `autoplay`, `loop`, `muted`, `playsinline`, `preload`
+- UI 컨트롤 옵션: `useNativeControls`, `showQualitySelector`, `showDownload`
+
+**Sprite 이미지 프리뷰 기능**
+- 프로그레스 바에 마우스를 올리면 해당 시간의 비디오 프레임 미리보기
+- Sprite metadata를 활용한 효율적인 프레임 표시
+- 시간 정보와 함께 표시되는 툴팁
+
+**제목/설명 오버레이 기능**
+- 비디오에 마우스 호버 시 좌상단에 제목과 설명 표시
+- 부드러운 페이드 인/아웃 애니메이션
+- Props로 독립적으로 활성화/비활성화 가능 (`showTitle`, `showDescription`)
+- 그라데이션 배경과 텍스트 섀도우로 가독성 향상
+
+**완전히 새로운 커스텀 컨트롤 UI**
+- ▶️ 재생/일시정지 버튼
+- ⏱️ 시간 표시 (현재/전체)
+- 📊 프로그레스 바 (재생 + 버퍼링 진행도)
+- 🔊 볼륨 컨트롤 (음소거 + 슬라이더)
+- 🎨 화질 선택 드롭다운 (Auto + 수동 선택)
+- 📥 다운로드 드롭다운 (Progressive 프로파일 목록)
+- ⛶ 전체화면 버튼
+
+**화질 선택 기능**
+- Auto 모드: 네트워크 상태에 따라 자동 화질 조정
+- 수동 선택: 사용자가 원하는 화질 고정 (1080p, 720p, 480p 등)
+- DASH와 HLS 모두 지원
+
+**다운로드 기능**
+- Progressive 프로파일 목록 표시
+- 화질별 파일 크기 표시 (선택사항)
+- 의미있는 파일명으로 다운로드 (제목_화질.mp4)
+- `format` 및 `status` 필드가 없는 프로파일도 지원 (유연한 필터링)
+
+**커스텀 액션 슬롯**
+- `#actions` 슬롯 추가로 사용자 정의 버튼 추가 가능
+- 슬롯 Props: `videoData`, `player`, `isPlaying`
+- 공유, 좋아요, 재생목록 등 자유롭게 확장
+
+**반응형 디자인**
+- 모바일 최적화: 작은 화면에서 볼륨 컨트롤 자동 숨김
+- 터치 친화적인 버튼 크기
+- 마우스 호버 시 컨트롤 자동 표시
+
+**개선된 상태 관리**
+- 플레이어 상태 추적: `isPlaying`, `currentTime`, `duration`, `volume`
+- 비디오 이벤트 핸들링: timeupdate, play, pause, ended 등
+- Computed 속성 활용으로 효율적인 렌더링
+
+**문서 및 예시**
+- 5가지 실전 예시 코드 제공 (BasicPlayer, CustomControlsPlayer, AutoplayLoopPlayer, CustomActionsPlayer, TitleOverlayPlayer)
+- 각 예시는 복사해서 바로 사용 가능
+- 예시 가이드 문서 포함
+
+**하위 호환성**
+- 기존 사용 방식 100% 유지
+- 새로운 Props는 모두 선택사항
+- 기존 코드 수정 없이 그대로 사용 가능
+
+### v1.2.0
+- **Video Player 컴포넌트**: 프론트엔드 비디오 플레이어 Vue 컴포넌트 추가
+- **Video Player API**: 플레이어 전용 API 엔드포인트 분리 (VideoPlayerApiController)
+- **스트리밍 폴백**: DASH → HLS → Progressive 자동 폴백 지원
+- **동적 라이브러리 로딩**: HLS.js 및 Dash.js 동적 로드
+- **확장 가능한 API**: 재생 이벤트, 분석, 조회수 등 확장 준비
 
 ### v1.1.2
 - **VideoField 안정화**: 커스텀 필드의 저장 및 로딩 로직 개선

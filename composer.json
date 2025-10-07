@@ -1,6 +1,6 @@
 {
     "name": "cms-orbit/video-field",
-    "version": "1.1.2",
+    "version": "1.1.3",
     "description": "A comprehensive video upload and multi-encoding system for CMS-Orbit with streaming support, transcoding, and thumbnails",
     "type": "library",
     "license": "MIT",
@@ -11,8 +11,8 @@
         }
     ],
     "require": {
-        "php": "^8.3",
-        "amuz/cms-orbit": "^3.0.21",
+        "php": "^8.2",
+        "amuz/cms-orbit": "^3.1.3",
         "intervention/image": "^3.0",
         "symfony/process": "^7.0",
         "league/flysystem": "^3.0",
